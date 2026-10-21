@@ -72,13 +72,19 @@ export class DatabaseService implements OnModuleInit {
     }
   }
 
-  private ensureDirs() {
-    if (!fs.existsSync(this.dataDir)) fs.mkdirSync(this.dataDir, { recursive: true });
-    if (!fs.existsSync(this.uploadsDir)) fs.mkdirSync(this.uploadsDir, { recursive: true });
-    const coversDir = path.join(this.uploadsDir, 'covers');
-    const stegoDir = path.join(this.uploadsDir, 'stego');
-    if (!fs.existsSync(coversDir)) fs.mkdirSync(coversDir, { recursive: true });
-    if (!fs.existsSync(stegoDir)) fs.mkdirSync(stegoDir, { recursive: true });
+  public ensureDirs() {
+    const requiredDirs = [
+      this.dataDir,
+      this.uploadsDir,
+      path.join(this.uploadsDir, 'covers'),
+      path.join(this.uploadsDir, 'stego'),
+    ];
+    for (const dir of requiredDirs) {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`[Storage] Direktori otomatis dibuat: ${dir}`);
+      }
+    }
   }
 
   private loadData() {

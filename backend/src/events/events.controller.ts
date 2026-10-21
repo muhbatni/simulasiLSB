@@ -62,7 +62,11 @@ export class EventsController {
 
     if (file) {
       const fileName = `template-${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-      const filePath = path.join(process.cwd(), 'uploads', 'covers', fileName);
+      const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+      if (!fs.existsSync(coversDir)) {
+        fs.mkdirSync(coversDir, { recursive: true });
+      }
+      const filePath = path.join(coversDir, fileName);
       fs.writeFileSync(filePath, file.buffer);
       templateImagePath = fileName;
     }

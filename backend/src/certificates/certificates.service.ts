@@ -111,8 +111,12 @@ export class CertificatesService {
     const embedResult = await this.lsbService.embedPayload(coverBuffer, metadata);
 
     // Simpan berkas citra stego ke disk storage
+    const stegoDir = path.join(process.cwd(), 'uploads', 'stego');
+    if (!fs.existsSync(stegoDir)) {
+      fs.mkdirSync(stegoDir, { recursive: true });
+    }
     const stegoFileName = `stego-${certId}.png`;
-    const stegoFilePath = path.join(process.cwd(), 'uploads', 'stego', stegoFileName);
+    const stegoFilePath = path.join(stegoDir, stegoFileName);
     fs.writeFileSync(stegoFilePath, embedResult.stegoBuffer);
 
     // Simpan data rekaman sertifikat ke basis data

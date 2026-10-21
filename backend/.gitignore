@@ -1,7 +1,11 @@
 # Dependencies
+node_modules
 node_modules/
+**/node_modules
+**/node_modules/**
 
 # Compilation Output
+dist
 dist/
 
 # Environment Variables
@@ -10,6 +14,7 @@ dist/
 !.env.example
 
 # Logs
+logs
 logs/
 *.log
 npm-debug.log*
@@ -17,11 +22,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Uploads & Generated Local Assets
-uploads/stego/*
-!uploads/stego/.gitkeep
-uploads/covers/*
-!uploads/covers/.gitkeep
+# Uploads - keep only uploads directory itself (empty)
+uploads/*
+!uploads/.gitkeep
 
 # Database & Runtime Local Data
 data/*.json

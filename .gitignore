@@ -1,7 +1,12 @@
 # Dependencies
-**/node_modules/
+node_modules
+node_modules/
+**/node_modules
+**/node_modules/**
 
 # Production & Build outputs
+dist
+dist/
 **/dist/
 **/dist-ssr/
 
@@ -11,6 +16,7 @@
 !.env.example
 
 # Logs
+logs
 logs/
 *.log
 npm-debug.log*
@@ -18,11 +24,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Runtime Uploads & Generated Local Assets
-backend/uploads/stego/*
-!backend/uploads/stego/.gitkeep
-backend/uploads/covers/*
-!backend/uploads/covers/.gitkeep
+# Runtime Uploads & Generated Local Assets - keep only uploads directory itself (empty)
+backend/uploads/*
+!backend/uploads/.gitkeep
 backend/data/*.json
 
 # Editor & OS files
