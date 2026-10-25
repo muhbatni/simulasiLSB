@@ -28,7 +28,6 @@ export class CertificateGeneratorService {
     const svg = `
     <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <!-- Gradients based on user color palette -->
         <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stop-color="#A14646" />
           <stop offset="50%" stop-color="#DA6556" />
@@ -122,33 +121,24 @@ export class CertificateGeneratorService {
       </g>
 
       <!-- Signatures -->
-      <!-- Left: Dekan Fakultas -->
       <g transform="translate(${280 * scale}, ${830 * scale})">
         <text text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" fill="#555555">Surabaya, ${this.escapeXml(params.tanggal)}</text>
         <text y="${25 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="600" fill="#333333">Dekan Fakultas Sains dan Teknologi</text>
-        
-        <!-- Stamp / Sign Mock -->
         <path d="M ${-60 * scale} ${75 * scale} Q ${0 * scale} ${45 * scale} ${60 * scale} ${70 * scale} T ${100 * scale} ${65 * scale}" stroke="#A14646" stroke-width="${3 * scale}" fill="none" opacity="0.8" />
-        
         <line x1="${-140 * scale}" y1="${110 * scale}" x2="${140 * scale}" y2="${110 * scale}" stroke="#333333" stroke-width="${1 * scale}" />
         <text y="${130 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="bold" fill="#222222">Dr. Achmad Teguh Wibowo, M.T.</text>
         <text y="${150 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${14 * scale}" fill="#777777">NIP. 198810262014031003</text>
       </g>
 
-      <!-- Right: Ketua Panitia / Dosen Pembimbing -->
       <g transform="translate(${width - 280 * scale}, ${830 * scale})">
         <text text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" fill="#555555">Ketua Penyelenggara / HIMA</text>
         <text y="${25 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="600" fill="#333333">Program Studi Sistem Informasi</text>
-
-        <!-- Signature Mock -->
         <path d="M ${-50 * scale} ${70 * scale} Q ${10 * scale} ${40 * scale} ${70 * scale} ${75 * scale}" stroke="#DA6556" stroke-width="${3 * scale}" fill="none" opacity="0.8" />
-
         <line x1="${-140 * scale}" y1="${110 * scale}" x2="${140 * scale}" y2="${110 * scale}" stroke="#333333" stroke-width="${1 * scale}" />
         <text y="${130 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="bold" fill="#222222">Muhammad Andik Izzuddin, M.T.</text>
         <text y="${150 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${14 * scale}" fill="#777777">NIP. 198403072014031001</text>
       </g>
 
-      <!-- Footer Micro-Hash Seal -->
       <text x="${width / 2}" y="${height - 20 * scale}" text-anchor="middle" font-family="'Courier New', monospace" font-size="${11 * scale}" fill="#A14646" opacity="0.7">
         E-CERTIFICATE SECURITY EMBEDDED WITH LSB SPATIAL STEGANOGRAPHY &amp; SHA-256 CRYPTOGRAPHIC SEAL
       </text>
@@ -157,6 +147,56 @@ export class CertificateGeneratorService {
 
     return sharp(Buffer.from(svg))
       .png({ compressionLevel: 9, effort: 1 })
+      .toBuffer();
+  }
+
+  /**
+   * Menimpa (overlay) teks nama penerima, nomor, dan peran pada template PNG (F-06 Catatan)
+   */
+  async overlayTextOnTemplate(
+    templateBuffer: Buffer,
+    params: CertificateDesignParams,
+  ): Promise<Buffer> {
+    const meta = await sharp(templateBuffer).metadata();
+    const width = meta.width || 1920;
+    const height = meta.height || 1080;
+    const scale = width / 1920;
+
+    // Layer SVG teks transparan di atas template
+    const textSvg = `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <!-- Certificate Number -->
+      <text x="${width / 2}" y="${290 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="600" fill="#444444" letter-spacing="${2 * scale}">
+        NOMOR: ${this.escapeXml(params.nomor)}
+      </text>
+
+      <!-- Recipient Name -->
+      <g transform="translate(${width / 2}, ${445 * scale})">
+        <text text-anchor="middle" font-family="'Georgia', serif" font-weight="bold" font-size="${50 * scale}" fill="#A14646">
+          ${this.escapeXml(params.nama)}
+        </text>
+        <line x1="${-300 * scale}" y1="${20 * scale}" x2="${300 * scale}" y2="${20 * scale}" stroke="#DA6556" stroke-width="${2 * scale}" />
+      </g>
+
+      <!-- Role & Details -->
+      <g transform="translate(${width / 2}, ${530 * scale})">
+        <text text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${22 * scale}" fill="#333333">
+          Sebagai <tspan font-weight="bold" fill="#DA6556">${this.escapeXml(params.peran)}</tspan>
+        </text>
+        <text y="${40 * scale}" text-anchor="middle" font-family="'Georgia', serif" font-weight="bold" font-size="${28 * scale}" fill="#222222">
+          ${this.escapeXml(params.kegiatan)}
+        </text>
+        <text y="${80 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${17 * scale}" fill="#666666">
+          ${this.escapeXml(params.tanggal)} &bull; ${this.escapeXml(params.lembaga)}
+        </text>
+      </g>
+    </svg>
+    `;
+
+    return sharp(templateBuffer)
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .composite([{ input: Buffer.from(textSvg), top: 0, left: 0 }])
+      .png({ compressionLevel: 9, palette: false })
       .toBuffer();
   }
 

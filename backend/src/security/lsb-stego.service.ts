@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PNG } from 'pngjs';
+import sharp from 'sharp';
 import { HashCryptoService } from './hash-crypto.service';
 
 export interface CertificateMetadata {
@@ -34,6 +35,7 @@ export interface VerificationResult {
   storedHash?: string;
   recomputedHash?: string;
   hashMatch?: boolean;
+  isOfficialDbRegistered?: boolean;
   extractedPayload?: string;
   executionTimeMs: number;
   imageDimensions?: { width: number; height: number };
@@ -45,6 +47,7 @@ export class LsbSteganoService {
 
   /**
    * Algoritma 3.1: Pembangkitan Hash SHA-256 dan Penyisipan Data LSB (Embedding)
+   * Mengikuti spesifikasi Bab 4.3 dan F-06
    */
   async embedPayload(
     coverPngBuffer: Buffer,
@@ -59,24 +62,44 @@ export class LsbSteganoService {
       );
     }
 
-    // 2. Sanitasi dan Serialisasi atribut metadata
+    // 2. Ratakan (flatten) transparansi ke latar putih jika ada transparansi (Bab 4.3)
+    let processedCoverBuffer = coverPngBuffer;
+    try {
+      processedCoverBuffer = await sharp(coverPngBuffer)
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
+        .png({ compressionLevel: 9, palette: false })
+        .toBuffer();
+    } catch {
+      // Jika sharp gagal flatten, gunakan buffer asli
+      processedCoverBuffer = coverPngBuffer;
+    }
+
+    // 3. Sanitasi dan Serialisasi atribut metadata M = Nomor#Nama#Peran#Kegiatan#Tanggal#Lembaga
+    // Spesifikasi 4.3: Karakter # dan @ pada data diganti kode escape (%23 dan %40)
+    const escapedNomor = this.escapeField(metadata.nomor);
+    const escapedNama = this.escapeField(metadata.nama);
+    const escapedPeran = this.escapeField(metadata.peran);
+    const escapedKegiatan = this.escapeField(metadata.kegiatan);
+    const escapedTanggal = this.escapeField(metadata.tanggal);
+    const escapedLembaga = this.escapeField(metadata.lembaga);
+
     const strMetadata = [
-      this.sanitizeField(metadata.nomor),
-      this.sanitizeField(metadata.nama),
-      this.sanitizeField(metadata.peran),
-      this.sanitizeField(metadata.kegiatan),
-      this.sanitizeField(metadata.tanggal),
-      this.sanitizeField(metadata.lembaga),
+      escapedNomor,
+      escapedNama,
+      escapedPeran,
+      escapedKegiatan,
+      escapedTanggal,
+      escapedLembaga,
     ].join('#');
 
-    // 3. Pembangkitan hash kriptografi SHA-256 (Segel Integritas)
-    const hashSha256 = this.hashCryptoService.computeSha256(strMetadata);
+    // 4. Pembangkitan hash kriptografi H = SHA-256(M) (64 hex lowercase)
+    const hashSha256 = this.hashCryptoService.computeSha256(strMetadata).toLowerCase();
 
-    // 4. Penyusunan string paket payload terintegrasi dengan delimiter
-    // Format: M + '###' + H + '@@@'
+    // 5. Penyusunan string paket payload terintegrasi dengan delimiter
+    // Format: P = M + '###' + H + '@@@'
     const payloadText = `${strMetadata}###${hashSha256}@@@`;
 
-    // 5. Transformasi payload menjadi aliran bit biner (8-bit per byte)
+    // 6. Transformasi payload menjadi aliran bit biner (8-bit per byte)
     const payloadBuffer = Buffer.from(payloadText, 'utf8');
     const bitStream: number[] = [];
     for (let i = 0; i < payloadBuffer.length; i++) {
@@ -87,10 +110,10 @@ export class LsbSteganoService {
     }
     const payloadLen = bitStream.length;
 
-    // 6. Parsing matriks piksel citra penampung PNG
+    // 7. Parsing matriks piksel citra penampung PNG
     let coverPng: PNG;
     try {
-      coverPng = PNG.sync.read(coverPngBuffer);
+      coverPng = PNG.sync.read(processedCoverBuffer);
     } catch (err: any) {
       throw new BadRequestException('ERROR: Gagal membaca struktur citra PNG: ' + err.message);
     }
@@ -98,7 +121,7 @@ export class LsbSteganoService {
     const { width, height } = coverPng;
     const maxCapacity = width * height * 3; // 1 bit LSB per kanal RGB
 
-    // Validasi Kapasitas
+    // Validasi Kapasitas: panjang bit <= lebar x tinggi x 3
     if (payloadLen > maxCapacity) {
       throw new BadRequestException(
         `Kapasitas citra tidak mencukupi: Payload membutuhkan ${payloadLen} bit, kapasitas citra hanya ${maxCapacity} bit`,
@@ -109,7 +132,7 @@ export class LsbSteganoService {
     const stegoPng = new PNG({ width, height });
     coverPng.data.copy(stegoPng.data);
 
-    // 8. Proses Substitusi Least Significant Bit (LSB)
+    // 8. Proses Substitusi Least Significant Bit (LSB): C' = (C AND 254) OR b
     let bitIdx = 0;
     const totalPixels = width * height;
 
@@ -130,23 +153,30 @@ export class LsbSteganoService {
         stegoPng.data[pixelOffset + 2] =
           (stegoPng.data[pixelOffset + 2] & 0xfe) | bitStream[bitIdx++];
       }
-      // Channel 3 (Alpha) dibiarkan tetap (biasanya 255)
+      // Channel 3 (Alpha) dibiarkan tetap (255)
     }
 
-    // 9. Rekonstruksi berkas citra stego PNG Lossless
+    // 9. Rekonstruksi berkas citra stego PNG Lossless (compressionLevel: 9)
     const stegoBuffer = PNG.sync.write(stegoPng, {
       deflateLevel: 9,
       deflateStrategy: 0,
     });
 
-    // Hitung MSE dan PSNR kualitas citra steganografi
+    // 10. Hitung MSE dan PSNR kualitas citra steganografi
     const { mse, psnr } = this.calculateMseAndPsnr(coverPng, stegoPng);
 
     const executionTimeMs = Number((performance.now() - startTime).toFixed(2));
 
     return {
       stegoBuffer,
-      metadata,
+      metadata: {
+        nomor: this.unescapeField(escapedNomor),
+        nama: this.unescapeField(escapedNama),
+        peran: this.unescapeField(escapedPeran),
+        kegiatan: this.unescapeField(escapedKegiatan),
+        tanggal: this.unescapeField(escapedTanggal),
+        lembaga: this.unescapeField(escapedLembaga),
+      },
       sha256Hash: hashSha256,
       payloadText,
       payloadBitsCount: payloadLen,
@@ -166,12 +196,12 @@ export class LsbSteganoService {
   async extractAndVerify(queryImageBuffer: Buffer): Promise<VerificationResult> {
     const startTime = performance.now();
 
-    // 1. Validasi format citra masukan
+    // 1. Validasi format citra masukan & magic bytes
     if (!this.isPng(queryImageBuffer)) {
       return {
         status: 'FORMAT_TIDAK_VALID',
         isValid: false,
-        message: 'Format bukan PNG lossless; data LSB tidak valid atau rusak',
+        message: 'Format bukan PNG lossless; tanda steganografi rusak atau tidak ditemukan',
         executionTimeMs: Number((performance.now() - startTime).toFixed(2)),
       };
     }
@@ -191,15 +221,15 @@ export class LsbSteganoService {
     const { width, height, data } = queryPng;
     const totalPixels = width * height;
 
-    // 2 & 3. Ekstraksi bit terendah (LSB) secara sekuensial
+    // 2 & 3. Ekstraksi bit terendah (LSB) secara sekuensial (R, G, B)
     const extractedBytes: number[] = [];
     let currentByteVal = 0;
     let bitCount = 0;
     let extractedPayload = '';
     let eofFound = false;
 
-    // Batasi pembacaan maksimal agar efisien (metadata sertifikat tidak akan lebih dari 10.000 karakter)
-    const MAX_CHAR_SCAN = 10000;
+    // Batasi pembacaan maksimal agar efisien (metadata sertifikat tidak lebih dari 20.000 karakter)
+    const MAX_CHAR_SCAN = 20000;
 
     for (let p = 0; p < totalPixels; p++) {
       const pixelOffset = p * 4;
@@ -243,7 +273,7 @@ export class LsbSteganoService {
         status: 'MANIPULASI_TERDETEKSI',
         isValid: false,
         message:
-          'Penanda EOF @@@ tidak ditemukan; bukan sertifikat resmi atau piksel telah rusak',
+          'Peringatan: Sertifikat Tidak Valid / Telah Mengalami Manipulasi Data! (Penanda @@@ tidak ditemukan)',
         executionTimeMs,
         imageDimensions: { width, height },
       };
@@ -255,38 +285,39 @@ export class LsbSteganoService {
       return {
         status: 'MANIPULASI_TERDETEKSI',
         isValid: false,
-        message: 'Struktur payload rusak; delimiter hash ### tidak ditemukan',
+        message:
+          'Peringatan: Sertifikat Tidak Valid / Telah Mengalami Manipulasi Data! (Delimiter ### hilang)',
         extractedPayload: cleanPayload,
         executionTimeMs,
         imageDimensions: { width, height },
       };
     }
 
-    const parts = cleanPayload.split('###');
-    const strMetaExt = parts[0];
-    const storedHash = parts[1];
+    const delimiterIndex = cleanPayload.lastIndexOf('###');
+    const strMetaExt = cleanPayload.substring(0, delimiterIndex);
+    const storedHash = cleanPayload.substring(delimiterIndex + 3).trim();
 
-    // 6. Perhitungan ulang hash SHA-256 dari metadata hasil ekstraksi
-    const recomputedHash = this.hashCryptoService.computeSha256(strMetaExt);
+    // 6. Perhitungan ulang hash SHA-256 dari metadata hasil ekstraksi (H_kalkulasi = SHA-256(M_ekstraksi))
+    const recomputedHash = this.hashCryptoService.computeSha256(strMetaExt).toLowerCase();
 
     // 7. Komparasi integritas data secara deterministik
-    const hashMatch = recomputedHash.toLowerCase() === storedHash.toLowerCase();
+    const hashMatch = recomputedHash === storedHash.toLowerCase();
 
     const metaTokens = strMetaExt.split('#');
     const metadata: CertificateMetadata = {
-      nomor: metaTokens[0] || '',
-      nama: metaTokens[1] || '',
-      peran: metaTokens[2] || '',
-      kegiatan: metaTokens[3] || '',
-      tanggal: metaTokens[4] || '',
-      lembaga: metaTokens[5] || '',
+      nomor: this.unescapeField(metaTokens[0] || ''),
+      nama: this.unescapeField(metaTokens[1] || ''),
+      peran: this.unescapeField(metaTokens[2] || ''),
+      kegiatan: this.unescapeField(metaTokens[3] || ''),
+      tanggal: this.unescapeField(metaTokens[4] || ''),
+      lembaga: this.unescapeField(metaTokens[5] || ''),
     };
 
     if (hashMatch) {
       return {
         status: 'ASLI_VALID',
         isValid: true,
-        message: 'Sertifikat Asli & Terverifikasi: Integritas hash SHA-256 cocok dan valid',
+        message: 'Sertifikat Asli & Terverifikasi (Integritas Terjaga)',
         metadata,
         storedHash,
         recomputedHash,
@@ -300,7 +331,7 @@ export class LsbSteganoService {
         status: 'MANIPULASI_TERDETEKSI',
         isValid: false,
         message:
-          'Peringatan: Hash kalkulasi tidak cocok! Data identitas atau piksel citra telah dimanipulasi',
+          'Peringatan: Sertifikat Tidak Valid / Telah Mengalami Manipulasi Data!',
         metadata,
         storedHash,
         recomputedHash,
@@ -316,7 +347,7 @@ export class LsbSteganoService {
    * Menghitung Mean Squared Error (MSE) dan Peak Signal-to-Noise Ratio (PSNR)
    * Formula:
    * MSE = 1 / (3 * W * H) * sum((C(x,y,c) - S(x,y,c))^2)
-   * PSNR = 10 * log10( (255^2) / MSE ) = 20 * log10( 255 / sqrt(MSE) )
+   * PSNR = 10 * log10( (255^2) / MSE )
    */
   calculateMseAndPsnr(
     coverPng: PNG,
@@ -345,7 +376,8 @@ export class LsbSteganoService {
     const totalChannels = totalPixels * 3;
     const mse = sumSquaredError / totalChannels;
 
-    let psnr = 100; // Perfect match
+    // Jika MSE = 0 (identik sempurna), PSNR dibatasi 100 dB (spec F-12)
+    let psnr = 100;
     if (mse > 0) {
       psnr = 10 * Math.log10((255 * 255) / mse);
     }
@@ -383,11 +415,10 @@ export class LsbSteganoService {
   }
 
   /**
-   * Memeriksa magic header berkas citra PNG
+   * Memeriksa magic header berkas citra PNG (89 50 4E 47 0D 0A 1A 0A)
    */
-  private isPng(buffer: Buffer): boolean {
+  public isPng(buffer: Buffer): boolean {
     if (!buffer || buffer.length < 8) return false;
-    // Magic PNG: 89 50 4E 47 0D 0A 1A 0A
     return (
       buffer[0] === 0x89 &&
       buffer[1] === 0x50 &&
@@ -400,9 +431,26 @@ export class LsbSteganoService {
     );
   }
 
-  private sanitizeField(value: string | undefined): string {
+  /**
+   * Escape karakter # dan @ menjadi %23 dan %40 (Spesifikasi 4.3 & F-04)
+   */
+  public escapeField(value: string | undefined): string {
     if (!value) return '';
-    // Hindari delimiter tabrakan
-    return value.replace(/#/g, '-').replace(/@/g, '').trim();
+    return value
+      .replace(/%/g, '%25')
+      .replace(/#/g, '%23')
+      .replace(/@/g, '%40')
+      .trim();
+  }
+
+  /**
+   * Unescape kode %23 dan %40 kembali ke # dan @ saat ditampilkan
+   */
+  public unescapeField(value: string | undefined): string {
+    if (!value) return '';
+    return value
+      .replace(/%23/g, '#')
+      .replace(/%40/g, '@')
+      .replace(/%25/g, '%');
   }
 }

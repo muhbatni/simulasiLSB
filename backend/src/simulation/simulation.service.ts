@@ -538,4 +538,61 @@ export class SimulationService {
       ],
     };
   }
+
+  /**
+   * F-12: Ekspor CSV Hasil Uji Reliabilitas & Kualitas Citra 50 Sampel
+   */
+  async exportSamplingCsv(samplesCount = 50): Promise<string> {
+    const testData = await this.runIterativeReliabilityTest(samplesCount);
+    const headers = [
+      'No',
+      'Kelompok Batch',
+      'Resolusi',
+      'Nomor Sertifikat',
+      'Nama Penerima',
+      'T_gen (Detik)',
+      'T_verif (Detik)',
+      'PSNR (dB)',
+      'MSE',
+      'Payload (Bits)',
+      'Kapasitas Terpakai (%)',
+      'Pembangkitan (SR_gen)',
+      'Verifikasi (SR_verif)',
+    ];
+
+    const rows = testData.samples.map((s) =>
+      [
+        s.sampleIndex,
+        `"${s.batch}"`,
+        `"${s.resolution}"`,
+        `"${s.nomorSertifikat}"`,
+        `"${s.namaPenerima}"`,
+        s.tGenSeconds,
+        s.tVerifSeconds,
+        s.psnr,
+        s.mse,
+        s.payloadBits,
+        `"${s.capacityUsagePercent}%"`,
+        s.genSuccess ? 'SUCCESS' : 'FAILED',
+        s.verifSuccess ? 'SUCCESS' : 'FAILED',
+      ].join(','),
+    );
+
+    const summaryRows = [
+      '',
+      `"REKAPITULASI PENGUJIAN PENELITIAN (BAB IV) - ${testData.summary.totalSamples} SAMPEL"`,
+      `"Total Sampel",${testData.summary.totalSamples}`,
+      `"Batch 1 (Full HD 1080p)",${testData.summary.batch1Count}`,
+      `"Batch 2 (A4 300DPI)",${testData.summary.batch2Count}`,
+      `"Success Rate Pembangkitan (SR_gen)",${testData.summary.successRateGen}%,"(Kriteria NF-08: 100%)"`,
+      `"Success Rate Verifikasi (SR_verif)",${testData.summary.successRateVerif}%,"(Kriteria NF-08: 100%)"`,
+      `"Rata-rata T_gen",${testData.summary.avgTGenSeconds} s,"(Kriteria NF-01: <= 3.0 s)"`,
+      `"Rata-rata T_verif",${testData.summary.avgTVerifSeconds} s,"(Kriteria NF-02: <= 2.0 s)"`,
+      `"Rata-rata PSNR",${testData.summary.avgPsnr} dB,"(Kriteria NF-09: >= 45.0 dB)"`,
+      `"Rata-rata MSE",${testData.summary.avgMse},"(Kriteria NF-09: < 0.05)"`,
+    ];
+
+    return [headers.join(','), ...rows, ...summaryRows].join('\n');
+  }
 }
+

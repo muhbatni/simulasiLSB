@@ -96,7 +96,9 @@ onMounted(() => {
       <!-- 2. Student Portal View -->
       <template v-else-if="activeTab === 'student'">
         <StudentPortal
-          :initial-query="currentUser?.role === 'mahasiswa' ? currentUser.username : '09020623041'"
+          :user="currentUser"
+          :initial-query="currentUser?.role === 'mahasiswa' ? currentUser.username : ''"
+          @open-login="openLoginModal"
         />
       </template>
 

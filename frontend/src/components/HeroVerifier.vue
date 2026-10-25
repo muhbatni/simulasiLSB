@@ -316,13 +316,29 @@ const loadSampleCertificate = async (type = 'valid') => {
           <div v-if="verificationResult" class="verification-outcome-box" :class="verificationResult.status">
             <!-- Authentic Certificate -->
             <template v-if="verificationResult.status === 'ASLI_VALID'">
-              <div class="outcome-header outcome-valid">
-                <div class="outcome-icon valid-icon">
+              <div
+                class="outcome-header"
+                :class="verificationResult.isOfficialDbRegistered !== false ? 'outcome-valid' : 'outcome-tampered'"
+              >
+                <div
+                  class="outcome-icon"
+                  :class="verificationResult.isOfficialDbRegistered !== false ? 'valid-icon' : 'tampered-icon'"
+                >
                   <ShieldCheck :size="26" />
                 </div>
                 <div>
-                  <h4 class="outcome-title">SERTIFIKAT ASLI &amp; TERVERIFIKASI</h4>
-                  <p class="outcome-sub">Integritas data terjamin 100% dan intisari hash SHA-256 cocok sempurna.</p>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <h4 class="outcome-title">
+                      {{ verificationResult.isOfficialDbRegistered !== false ? 'SERTIFIKAT ASLI & TERVERIFIKASI' : 'STRUKTUR HASH VALID (TIDAK TERDAFTAR DI DB)' }}
+                    </h4>
+                    <span
+                      class="badge"
+                      :class="verificationResult.isOfficialDbRegistered !== false ? 'badge-valid' : 'badge-brand'"
+                    >
+                      {{ verificationResult.isOfficialDbRegistered !== false ? 'Terdaftar Resmi di DB (F-10)' : 'Tidak Tercatat di DB (F-10)' }}
+                    </span>
+                  </div>
+                  <p class="outcome-sub">{{ verificationResult.message }}</p>
                 </div>
               </div>
 

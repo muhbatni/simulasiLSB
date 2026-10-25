@@ -15,16 +15,54 @@ export class VerificationService {
   ): Promise<VerificationResult> {
     const result = await this.lsbService.extractAndVerify(imageBuffer);
 
-    // Cari sertifikat terkait di database jika ada
     let certId: string | undefined = undefined;
-    if (result.metadata?.nomor) {
-      const found = this.db.certificates.find(
-        (c) => c.certificateNumber.toLowerCase() === result.metadata!.nomor.toLowerCase(),
+    let isOfficialDbRegistered = false;
+    let detailMessage = result.message;
+
+    // F-10: Pencocokan ke Basis Data Resmi (Database Matching)
+    if (result.isValid && result.metadata?.nomor) {
+      const dbCert = this.db.certificates.find(
+        (c) =>
+          c.certificateNumber.trim().toLowerCase() ===
+          result.metadata!.nomor.trim().toLowerCase(),
       );
-      if (found) certId = found.id;
+
+      if (dbCert) {
+        certId = dbCert.id;
+        // Cek status pencabutan
+        if (dbCert.status === 'DICABUT') {
+          result.isValid = false;
+          result.status = 'MANIPULASI_TERDETEKSI';
+          result.message =
+            'Peringatan: Sertifikat telah dicabut dan dinyatakan tidak berlaku lagi oleh universitas.';
+          detailMessage = 'Status di basis data: DICABUT';
+        } else if (
+          dbCert.sha256Hash &&
+          dbCert.sha256Hash.toLowerCase() === result.storedHash?.toLowerCase()
+        ) {
+          isOfficialDbRegistered = true;
+          result.message =
+            'Sertifikat Asli & Terverifikasi (Integritas Terjaga - Terdaftar Resmi di Basis Data)';
+          detailMessage = 'Terverifikasi cocok dengan rekaman basis data resmi';
+        } else {
+          result.isValid = false;
+          result.status = 'MANIPULASI_TERDETEKSI';
+          result.message =
+            'Peringatan: Hash citra tidak sesuai dengan rekaman hash resmi di basis data universitas.';
+          detailMessage = 'Hash mismatch dengan tabel Certificates';
+        }
+      } else {
+        // Hash internal cocok, namun nomor sertifikat tidak ditemukan di DB
+        isOfficialDbRegistered = false;
+        result.message =
+          'Peringatan: Struktur dan hash internal valid, namun TIDAK TERDAFTAR di basis data resmi penerbit (indikasi sertifikat tiruan pihak luar).';
+        detailMessage = 'Nomor sertifikat tidak ditemukan di basis data resmi';
+      }
     }
 
-    // Catat ke VerificationLogs
+    result.isOfficialDbRegistered = isOfficialDbRegistered;
+
+    // F-11: Catat Jejak Audit ke VerificationLogs
     const log: VerificationLog = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       certificateId: certId,
@@ -32,8 +70,10 @@ export class VerificationService {
       recipientName: result.metadata?.nama,
       ipAddress,
       verificationStatus: result.status,
+      tVerifMs: result.executionTimeMs,
       verifiedAt: new Date().toISOString(),
       message: result.message,
+      detail: detailMessage,
       storedHash: result.storedHash,
       recomputedHash: result.recomputedHash,
     };
@@ -44,8 +84,75 @@ export class VerificationService {
     return result;
   }
 
-  getLogs(limit = 100): VerificationLog[] {
-    return this.db.verificationLogs.slice(0, limit);
+  // F-11: Filter Log Verifikasi
+  getLogs(query?: {
+    status?: string;
+    q?: string;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+  }): VerificationLog[] {
+    let list = this.db.verificationLogs;
+
+    if (query?.status) {
+      list = list.filter((l) => l.verificationStatus === query.status);
+    }
+
+    if (query?.q) {
+      const q = query.q.trim().toLowerCase();
+      list = list.filter(
+        (l) =>
+          (l.certificateNumber && l.certificateNumber.toLowerCase().includes(q)) ||
+          (l.recipientName && l.recipientName.toLowerCase().includes(q)) ||
+          l.ipAddress.includes(q),
+      );
+    }
+
+    if (query?.startDate) {
+      const from = new Date(query.startDate).getTime();
+      list = list.filter((l) => new Date(l.verifiedAt).getTime() >= from);
+    }
+
+    if (query?.endDate) {
+      const to = new Date(query.endDate).getTime();
+      list = list.filter((l) => new Date(l.verifiedAt).getTime() <= to);
+    }
+
+    const limit = query?.limit ? Number(query.limit) : 200;
+    return list.slice(0, limit);
+  }
+
+  // F-11: Ekspor CSV Log Verifikasi
+  exportLogsToCsv(): string {
+    const headers = [
+      'ID Log',
+      'Waktu Verifikasi (WIB)',
+      'IP Pemohon',
+      'Nomor Sertifikat',
+      'Nama Penerima',
+      'Status Verifikasi',
+      'Latensi (ms)',
+      'Keterangan',
+      'Detail Audit',
+      'Hash SHA-256',
+    ];
+
+    const rows = this.db.verificationLogs.map((l) => {
+      return [
+        `"${l.id}"`,
+        `"${new Date(l.verifiedAt).toLocaleString('id-ID')}"`,
+        `"${l.ipAddress}"`,
+        `"${l.certificateNumber || '-'}"`,
+        `"${l.recipientName || '-'}"`,
+        `"${l.verificationStatus}"`,
+        `"${l.tVerifMs || 0}"`,
+        `"${(l.message || '').replace(/"/g, '""')}"`,
+        `"${(l.detail || '').replace(/"/g, '""')}"`,
+        `"${l.storedHash || '-'}"`,
+      ].join(',');
+    });
+
+    return [headers.join(','), ...rows].join('\n');
   }
 
   getStats() {
@@ -63,7 +170,7 @@ export class VerificationService {
       validCount: valid,
       manipulatedCount: manipulated,
       invalidFormatCount: invalidFormat,
-      totalCertificatesIssued: this.db.certificates.length,
+      totalCertificatesIssued: this.db.certificates.filter((c) => c.status === 'TERBIT').length,
       totalEvents: this.db.events.length,
     };
   }

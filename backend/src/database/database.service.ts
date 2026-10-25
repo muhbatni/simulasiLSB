@@ -18,6 +18,7 @@ export interface EventEntity {
   eventDate: string;
   organizer: string;
   templateImagePath?: string;
+  isActive: boolean;
   createdBy: string;
   createdAt: string;
   totalCertificates?: number;
@@ -31,11 +32,13 @@ export interface CertificateEntity {
   recipientIdentifier: string; // NIM atau Email
   recipientRole: string; // Peserta, Pemateri, Panitia
   sha256Hash: string;
-  stegoImagePath: string;
+  stegoImagePath?: string;
   coverImagePath?: string;
+  status: 'BELUM_TERBIT' | 'TERBIT' | 'DICABUT';
   mse: number;
   psnr: number;
-  issuedAt: string;
+  tGenMs?: number;
+  issuedAt?: string;
   eventName?: string;
   organizer?: string;
 }
@@ -49,6 +52,8 @@ export interface VerificationLog {
   verificationStatus: 'ASLI_VALID' | 'MANIPULASI_TERDETEKSI' | 'FORMAT_TIDAK_VALID';
   verifiedAt: string;
   message: string;
+  tVerifMs?: number;
+  detail?: string;
   storedHash?: string;
   recomputedHash?: string;
 }
@@ -69,6 +74,24 @@ export class DatabaseService implements OnModuleInit {
     this.loadData();
     if (this.users.length === 0) {
       await this.seedInitialData();
+    } else {
+      // Migrate existing records if missing new spec fields
+      let changed = false;
+      for (const evt of this.events) {
+        if (evt.isActive === undefined) {
+          evt.isActive = true;
+          changed = true;
+        }
+      }
+      for (const cert of this.certificates) {
+        if (!cert.status) {
+          cert.status = 'TERBIT';
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.saveData();
+      }
     }
   }
 
@@ -93,8 +116,14 @@ export class DatabaseService implements OnModuleInit {
         const raw = fs.readFileSync(this.dbFile, 'utf8');
         const parsed = JSON.parse(raw);
         this.users = parsed.users || [];
-        this.events = parsed.events || [];
-        this.certificates = parsed.certificates || [];
+        this.events = (parsed.events || []).map((e: any) => ({
+          ...e,
+          isActive: e.isActive !== undefined ? e.isActive : true,
+        }));
+        this.certificates = (parsed.certificates || []).map((c: any) => ({
+          ...c,
+          status: c.status || 'TERBIT',
+        }));
         this.verificationLogs = parsed.verificationLogs || [];
       } catch (e) {
         console.warn('Gagal membaca db.json, menginisialisasi baru', e);
@@ -153,6 +182,7 @@ export class DatabaseService implements OnModuleInit {
         eventName: 'Seminar Nasional AI & Keamanan Informasi Digital 2026',
         eventDate: '2026-10-16',
         organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
+        isActive: true,
         createdBy: 'usr-admin-1',
         createdAt: new Date().toISOString(),
       },
@@ -161,6 +191,7 @@ export class DatabaseService implements OnModuleInit {
         eventName: 'Workshop Fullstack Modern NestJS & Vue.js 3',
         eventDate: '2026-10-18',
         organizer: 'Himpunan Mahasiswa Sistem Informasi (HIMASI) UINSA',
+        isActive: true,
         createdBy: 'usr-hima-1',
         createdAt: new Date().toISOString(),
       },
@@ -169,6 +200,7 @@ export class DatabaseService implements OnModuleInit {
         eventName: 'Pelatihan Keamanan Siber: LSB Steganography & SHA-256',
         eventDate: '2026-10-20',
         organizer: 'Laboratorium Rekayasa Perangkat Lunak & Siber FST UINSA',
+        isActive: true,
         createdBy: 'usr-admin-1',
         createdAt: new Date().toISOString(),
       },

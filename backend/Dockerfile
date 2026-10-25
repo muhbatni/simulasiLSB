@@ -9,6 +9,8 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 
+RUN apk add --no-cache fontconfig ttf-dejavu
+
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev

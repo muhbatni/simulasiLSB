@@ -14,7 +14,8 @@ import {
   BarChart2,
   ShieldAlert,
   FileCheck2,
-  HelpCircle
+  HelpCircle,
+  Download
 } from '@lucide/vue'
 
 const activeLabTab = ref('blackbox') // 'blackbox' | 'sampling' | 'imperceptibility' | 'tamper'
@@ -73,6 +74,29 @@ const runTamperTest = async () => {
     console.error('Tamper test error:', err)
   } finally {
     isRunningTamper.value = false
+  }
+}
+
+const isExportingMetrics = ref(false)
+
+const handleExportMetricsCsv = async (count = 50) => {
+  isExportingMetrics.value = true
+  try {
+    const token = localStorage.getItem('lsb_token')
+    const res = await axios.get(`/api/metrics/export?count=${count}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'text/csv' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `Hasil-Uji-Metrik-${count}-Sampel-${Date.now()}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (err) {
+    alert('Gagal mengekspor CSV metrik hasil uji. Pastikan Anda telah login sebagai admin.')
+  } finally {
+    isExportingMetrics.value = false
   }
 }
 
@@ -228,6 +252,11 @@ onMounted(() => {
               </p>
             </div>
             <div class="btn-group">
+              <button class="btn btn-secondary btn-sm" :disabled="isExportingMetrics" @click="handleExportMetricsCsv(50)">
+                <RefreshCw v-if="isExportingMetrics" :size="15" class="spin-icon" />
+                <Download v-else :size="15" />
+                <span>Ekspor CSV (F-12)</span>
+              </button>
               <button class="btn btn-secondary btn-sm" :disabled="isRunningSampling" @click="runSamplingTest(10)">
                 Uji 10 Sampel Cepat
               </button>

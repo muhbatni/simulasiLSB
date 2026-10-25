@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 import {
   Award,
@@ -18,7 +18,14 @@ import {
   Trash2,
   UploadCloud,
   FileCheck,
-  UserCheck
+  UserCheck,
+  Eye,
+  FileText,
+  Filter,
+  CheckSquare,
+  Square,
+  Archive,
+  Power
 } from '@lucide/vue'
 
 const props = defineProps({
@@ -27,7 +34,7 @@ const props = defineProps({
 
 const emit = defineEmits(['login-success'])
 
-const activeSubTab = ref('generator') // 'generator' | 'bulk' | 'events' | 'logs'
+const activeSubTab = ref('recipients') // 'recipients' | 'generator' | 'events' | 'issued' | 'logs'
 const events = ref([])
 const certificates = ref([])
 const stats = ref(null)
@@ -39,7 +46,54 @@ const loginPassword = ref('123')
 const loginError = ref('')
 const isLoggingIn = ref(false)
 
-// Single Generator Form
+// Active Selected Event for Management
+const selectedEventId = ref('')
+const selectedEventRecipients = ref([])
+const isLoadingRecipients = ref(false)
+
+// Single Recipient Add Form (F-04)
+const showAddRecipientModal = ref(false)
+const newRecipientForm = ref({
+  certificateNumber: '',
+  recipientName: '',
+  recipientIdentifier: '',
+  recipientRole: 'Peserta',
+})
+const isAddingRecipient = ref(false)
+const addRecipientError = ref('')
+
+// CSV Import Modal & Preview (F-05)
+const showCsvImportModal = ref(false)
+const csvTextInput = ref(`UINSA/FST/2026/011,Dewi Lestari,09020623011,Peserta
+UINSA/FST/2026/012,Bagus Setiawan,09020623012,Peserta
+UINSA/FST/2026/013,Fitri Handayani,09020623013,Peserta
+UINSA/FST/2026/014,Rizki Pratama,09020623014,Pemateri`)
+const csvFile = ref(null)
+const isPreviewingCsv = ref(false)
+const isImportingCsv = ref(false)
+const csvPreviewData = ref(null)
+const csvImportError = ref('')
+
+// Issuance Selection (F-06)
+const selectedRecipientIds = ref([])
+const isIssuing = ref(false)
+const issueResolution = ref('1080p')
+const issueResult = ref(null)
+
+// Issued Certs & ZIP Selection (F-07)
+const selectedIssuedCertIds = ref([])
+const isDownloadingZip = ref(false)
+
+// Event Form & Editing (F-03)
+const newEventForm = ref({
+  eventName: '',
+  eventDate: new Date().toISOString().split('T')[0],
+  organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
+})
+const newEventTemplate = ref(null)
+const isCreatingEvent = ref(false)
+
+// Instant Single Generator Form (Legacy support)
 const genForm = ref({
   eventId: '',
   recipientName: 'Muhammad Raihan',
@@ -53,23 +107,15 @@ const isGenerating = ref(false)
 const genResult = ref(null)
 const genError = ref('')
 
-// Bulk Generator Form
-const bulkEventId = ref('')
-const bulkCsvText = ref(`Dewi Lestari,09020623011,Peserta
-Bagus Setiawan,09020623012,Peserta
-Fitri Handayani,09020623013,Peserta
-Rizki Pratama,09020623014,Pemateri`)
-const isBulkProcessing = ref(false)
-const bulkResult = ref(null)
+// Audit Logs Filter (F-11)
+const logStatusFilter = ref('')
+const logSearchQuery = ref('')
+const isLoadingLogs = ref(false)
 
-// Event Form
-const newEventForm = ref({
-  eventName: '',
-  eventDate: new Date().toISOString().split('T')[0],
-  organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
-})
-const newEventTemplate = ref(null)
-const isCreatingEvent = ref(false)
+const authHeaders = () => {
+  const token = localStorage.getItem('lsb_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 const handleLogin = async () => {
   loginError.value = ''
@@ -83,7 +129,7 @@ const handleLogin = async () => {
     emit('login-success', res.data.user)
     await loadDashboardData()
   } catch (err) {
-    loginError.value = err.response?.data?.message || 'Login gagal, periksa kredensial'
+    loginError.value = err.response?.data?.message || 'Username atau password salah'
   } finally {
     isLoggingIn.value = false
   }
@@ -91,26 +137,319 @@ const handleLogin = async () => {
 
 const loadDashboardData = async () => {
   try {
-    const [eventsRes, certsRes, statsRes, logsRes] = await Promise.all([
+    const [eventsRes, certsRes, statsRes] = await Promise.all([
       axios.get('/api/events'),
       axios.get('/api/certificates'),
       axios.get('/api/verification/stats'),
-      axios.get('/api/verification/logs'),
     ])
     events.value = eventsRes.data
     certificates.value = certsRes.data
     stats.value = statsRes.data
-    logs.value = logsRes.data
 
-    if (events.value.length > 0 && !genForm.value.eventId) {
+    if (events.value.length > 0 && !selectedEventId.value) {
+      selectedEventId.value = events.value[0].id
       genForm.value.eventId = events.value[0].id
-      bulkEventId.value = events.value[0].id
     }
+
+    if (selectedEventId.value) {
+      await loadRecipients(selectedEventId.value)
+    }
+
+    await loadLogs()
   } catch (err) {
     console.error('Gagal memuat data dashboard:', err)
   }
 }
 
+const loadRecipients = async (eventId) => {
+  if (!eventId) return
+  isLoadingRecipients.value = true
+  selectedRecipientIds.value = []
+  try {
+    const res = await axios.get(`/api/events/${eventId}/recipients`, {
+      headers: authHeaders(),
+    })
+    selectedEventRecipients.value = res.data
+  } catch (err) {
+    console.error('Gagal memuat penerima event:', err)
+  } finally {
+    isLoadingRecipients.value = false
+  }
+}
+
+const handleEventChange = async () => {
+  await loadRecipients(selectedEventId.value)
+}
+
+// F-04: Tambah Calon Penerima Individual
+const handleAddRecipient = async () => {
+  if (!selectedEventId.value) return
+  isAddingRecipient.value = true
+  addRecipientError.value = ''
+
+  try {
+    await axios.post(
+      `/api/events/${selectedEventId.value}/recipients`,
+      newRecipientForm.value,
+      { headers: authHeaders() }
+    )
+    showAddRecipientModal.value = false
+    newRecipientForm.value = {
+      certificateNumber: '',
+      recipientName: '',
+      recipientIdentifier: '',
+      recipientRole: 'Peserta',
+    }
+    await loadRecipients(selectedEventId.value)
+  } catch (err) {
+    addRecipientError.value = err.response?.data?.message || 'Gagal menambahkan penerima'
+  } finally {
+    isAddingRecipient.value = false
+  }
+}
+
+// F-05: CSV Import with Preview
+const handleCsvFileChange = (e) => {
+  csvFile.value = e.target.files[0]
+}
+
+const handlePreviewCsv = async () => {
+  if (!selectedEventId.value) return
+  isPreviewingCsv.value = true
+  csvImportError.value = ''
+  csvPreviewData.value = null
+
+  try {
+    const formData = new FormData()
+    if (csvFile.value) {
+      formData.append('csvFile', csvFile.value)
+    } else {
+      formData.append('csvText', csvTextInput.value)
+    }
+    formData.append('preview', 'true')
+
+    const res = await axios.post(
+      `/api/events/${selectedEventId.value}/recipients/import`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...authHeaders(),
+        },
+      }
+    )
+    csvPreviewData.value = res.data
+  } catch (err) {
+    csvImportError.value = err.response?.data?.message || 'Gagal membaca berkas CSV'
+  } finally {
+    isPreviewingCsv.value = false
+  }
+}
+
+const handleExecuteCsvImport = async () => {
+  if (!selectedEventId.value) return
+  isImportingCsv.value = true
+  csvImportError.value = ''
+
+  try {
+    const formData = new FormData()
+    if (csvFile.value) {
+      formData.append('csvFile', csvFile.value)
+    } else {
+      formData.append('csvText', csvTextInput.value)
+    }
+    formData.append('preview', 'false')
+
+    await axios.post(
+      `/api/events/${selectedEventId.value}/recipients/import`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...authHeaders(),
+        },
+      }
+    )
+    showCsvImportModal.value = false
+    csvPreviewData.value = null
+    csvFile.value = null
+    await loadRecipients(selectedEventId.value)
+    alert('Impor massal penerima berhasil disimpan dengan status Belum Terbit!')
+  } catch (err) {
+    csvImportError.value = err.response?.data?.message || 'Gagal mengimpor data CSV'
+  } finally {
+    isImportingCsv.value = false
+  }
+}
+
+// F-06: Penerbitan Sertifikat (SHA-256 + LSB)
+const toggleSelectAllRecipients = () => {
+  const unpublished = selectedEventRecipients.value.filter((r) => r.status === 'BELUM_TERBIT')
+  if (selectedRecipientIds.value.length === unpublished.length) {
+    selectedRecipientIds.value = []
+  } else {
+    selectedRecipientIds.value = unpublished.map((r) => r.id)
+  }
+}
+
+const handleIssueSelected = async () => {
+  if (!selectedEventId.value) return
+  isIssuing.value = true
+  issueResult.value = null
+
+  try {
+    const res = await axios.post(
+      '/api/certificates/issue',
+      {
+        eventId: selectedEventId.value,
+        recipientIds: selectedRecipientIds.value.length > 0 ? selectedRecipientIds.value : undefined,
+        resolution: issueResolution.value,
+      },
+      { headers: authHeaders() }
+    )
+    issueResult.value = res.data
+    selectedRecipientIds.value = []
+    await loadRecipients(selectedEventId.value)
+    await loadDashboardData()
+  } catch (err) {
+    alert(err.response?.data?.message || 'Gagal menerbitkan sertifikat')
+  } finally {
+    isIssuing.value = false
+  }
+}
+
+// F-07: Unduh ZIP Banyak Sertifikat Sekaligus
+const toggleSelectAllIssued = () => {
+  if (selectedIssuedCertIds.value.length === certificates.value.length) {
+    selectedIssuedCertIds.value = []
+  } else {
+    selectedIssuedCertIds.value = certificates.value.map((c) => c.id)
+  }
+}
+
+const handleDownloadZip = async () => {
+  if (selectedIssuedCertIds.value.length === 0) {
+    alert('Pilih minimal satu sertifikat untuk diunduh sebagai ZIP')
+    return
+  }
+  isDownloadingZip.value = true
+  try {
+    const res = await axios.post(
+      '/api/certificates/download-zip',
+      { certificateIds: selectedIssuedCertIds.value },
+      {
+        headers: authHeaders(),
+        responseType: 'blob',
+      }
+    )
+    const blob = new Blob([res.data], { type: 'application/zip' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `E-Sertifikat-Lossless-UINSA-${Date.now()}.zip`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (err) {
+    alert('Gagal mengunduh ZIP sertifikat')
+  } finally {
+    isDownloadingZip.value = false
+  }
+}
+
+// F-03: Event Management (Create, Toggle Active, Delete)
+const handleCreateEvent = async () => {
+  if (!newEventForm.value.eventName) return
+  isCreatingEvent.value = true
+  try {
+    const formData = new FormData()
+    formData.append('eventName', newEventForm.value.eventName)
+    formData.append('eventDate', newEventForm.value.eventDate)
+    formData.append('organizer', newEventForm.value.organizer)
+
+    if (newEventTemplate.value) {
+      formData.append('templateImage', newEventTemplate.value)
+    }
+
+    await axios.post('/api/events', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        ...authHeaders(),
+      },
+    })
+
+    newEventForm.value.eventName = ''
+    newEventTemplate.value = null
+    await loadDashboardData()
+    alert('Agenda kegiatan berhasil ditambahkan!')
+  } catch (err) {
+    alert(err.response?.data?.message || 'Gagal membuat event')
+  } finally {
+    isCreatingEvent.value = false
+  }
+}
+
+const handleToggleEventActive = async (event) => {
+  try {
+    await axios.patch(
+      `/api/events/${event.id}`,
+      { isActive: !event.isActive },
+      { headers: authHeaders() }
+    )
+    await loadDashboardData()
+  } catch (err) {
+    alert(err.response?.data?.message || 'Gagal mengubah status event')
+  }
+}
+
+const handleDeleteEvent = async (event) => {
+  const confirmMsg = `Yakin ingin menghapus agenda '${event.eventName}'?`
+  if (!confirm(confirmMsg)) return
+
+  try {
+    await axios.delete(`/api/events/${event.id}`, { headers: authHeaders() })
+    await loadDashboardData()
+    alert('Agenda berhasil dihapus.')
+  } catch (err) {
+    alert(err.response?.data?.message || 'Event yang sudah memiliki sertifikat terbit tidak dapat dihapus, hanya dapat dinonaktifkan.')
+  }
+}
+
+// F-11: Audit Logs Filter & CSV Export
+const loadLogs = async () => {
+  isLoadingLogs.value = true
+  try {
+    const params = new URLSearchParams()
+    if (logStatusFilter.value) params.append('status', logStatusFilter.value)
+    if (logSearchQuery.value) params.append('q', logSearchQuery.value)
+
+    const res = await axios.get(`/api/verification/logs?${params.toString()}`, {
+      headers: authHeaders(),
+    })
+    logs.value = res.data
+  } catch (err) {
+    console.error('Gagal memuat log:', err)
+  } finally {
+    isLoadingLogs.value = false
+  }
+}
+
+const handleExportLogsCsv = async () => {
+  try {
+    const res = await axios.get('/api/verification/logs/export-csv', {
+      headers: authHeaders(),
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'text/csv' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `VerificationLogs-${Date.now()}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (err) {
+    alert('Gagal mengekspor CSV riwayat verifikasi')
+  }
+}
+
+// Instant Single Generate Form
 const handleCoverFileChange = (e) => {
   customCoverFile.value = e.target.files[0]
 }
@@ -121,7 +460,6 @@ const handleSingleGenerate = async () => {
   genResult.value = null
 
   try {
-    const token = localStorage.getItem('lsb_token')
     const formData = new FormData()
     formData.append('eventId', genForm.value.eventId)
     formData.append('recipientName', genForm.value.recipientName)
@@ -139,7 +477,7 @@ const handleSingleGenerate = async () => {
     const res = await axios.post('/api/certificates/generate', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
-        Authorization: `Bearer ${token}`,
+        ...authHeaders(),
       },
     })
     genResult.value = res.data
@@ -151,73 +489,6 @@ const handleSingleGenerate = async () => {
   }
 }
 
-const handleBulkGenerate = async () => {
-  if (!bulkEventId.value) return
-  isBulkProcessing.value = true
-  bulkResult.value = null
-
-  try {
-    const lines = bulkCsvText.value.split('\n').filter((l) => l.trim().length > 0)
-    const recipients = lines.map((line) => {
-      const parts = line.split(',')
-      return {
-        name: parts[0]?.trim() || 'Peserta',
-        identifier: parts[1]?.trim() || 'NIM-000',
-        role: parts[2]?.trim() || 'Peserta',
-      }
-    })
-
-    const token = localStorage.getItem('lsb_token')
-    const res = await axios.post(
-      '/api/certificates/bulk-generate',
-      {
-        eventId: bulkEventId.value,
-        recipients,
-      },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
-    )
-    bulkResult.value = res.data
-    await loadDashboardData()
-  } catch (err) {
-    console.error('Bulk generate gagal:', err)
-  } finally {
-    isBulkProcessing.value = false
-  }
-}
-
-const handleCreateEvent = async () => {
-  if (!newEventForm.value.eventName) return
-  isCreatingEvent.value = true
-  try {
-    const token = localStorage.getItem('lsb_token')
-    const formData = new FormData()
-    formData.append('eventName', newEventForm.value.eventName)
-    formData.append('eventDate', newEventForm.value.eventDate)
-    formData.append('organizer', newEventForm.value.organizer)
-
-    if (newEventTemplate.value) {
-      formData.append('templateImage', newEventTemplate.value)
-    }
-
-    await axios.post('/api/events', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    newEventForm.value.eventName = ''
-    newEventTemplate.value = null
-    await loadDashboardData()
-  } catch (err) {
-    alert(err.response?.data?.message || 'Gagal membuat event')
-  } finally {
-    isCreatingEvent.value = false
-  }
-}
-
 onMounted(() => {
   loadDashboardData()
 })
@@ -226,7 +497,7 @@ onMounted(() => {
 <template>
   <section class="admin-section">
     <div class="container">
-      <!-- If Not Logged In: Elegant Login Card (Triv.co.id Style) -->
+      <!-- Login Form if not logged in -->
       <div v-if="!user" class="login-wrapper">
         <div class="login-card glass-card">
           <div class="login-header">
@@ -273,14 +544,14 @@ onMounted(() => {
           </form>
 
           <div class="demo-creds-hint">
-            <span>Satu Login Terpadu: <strong>admin</strong> (Fakultas) atau <strong>NIM</strong> (Mahasiswa) &bull; Password tetap: <strong>123</strong></span>
+            <span>Login Admin: <strong>admin</strong> (Fakultas) &bull; Password: <strong>123</strong></span>
           </div>
         </div>
       </div>
 
-      <!-- If Logged In: Full Admin Dashboard -->
+      <!-- Full Admin Dashboard -->
       <div v-else class="dashboard-wrapper">
-        <!-- Dashboard Top Bar -->
+        <!-- Top Banner -->
         <div class="dash-header">
           <div>
             <div class="badge badge-brand">
@@ -288,7 +559,7 @@ onMounted(() => {
               <span>ADMINISTRASI RESMI FAKULTAS</span>
             </div>
             <h2 class="dash-title">Admin Studio E-Sertifikat</h2>
-            <p class="dash-sub">Kelola agenda kegiatan, penerbitan steganografi LSB, serta audit verifikasi.</p>
+            <p class="dash-sub">Kelola calon penerima, impor massal CSV, steganografi LSB, serta audit log verifikasi.</p>
           </div>
           <div class="user-pill">
             <div class="u-avatar">{{ user.name.charAt(0) }}</div>
@@ -299,11 +570,11 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Metric Stat Cards (Triv.co.id Style) -->
+        <!-- Metric Stat Cards -->
         <div class="stats-row">
           <div class="stat-box glass-card">
             <div class="stat-top">
-              <span class="stat-title">Total E-Sertifikat Terbit</span>
+              <span class="stat-title">Total Sertifikat Terbit</span>
               <Award :size="20" class="stat-icon text-gold" />
             </div>
             <div class="stat-number">{{ stats?.totalCertificatesIssued || certificates.length }}</div>
@@ -312,7 +583,7 @@ onMounted(() => {
 
           <div class="stat-box glass-card">
             <div class="stat-top">
-              <span class="stat-title">Agenda / Event Aktif</span>
+              <span class="stat-title">Agenda / Event Terdaftar</span>
               <Calendar :size="20" class="stat-icon text-coral" />
             </div>
             <div class="stat-number">{{ events.length }}</div>
@@ -321,7 +592,7 @@ onMounted(() => {
 
           <div class="stat-box glass-card">
             <div class="stat-top">
-              <span class="stat-title">Total Pemeriksaan Publik</span>
+              <span class="stat-title">Total Verifikasi Masuk</span>
               <Activity :size="20" class="stat-icon text-emerald" />
             </div>
             <div class="stat-number">{{ stats?.totalVerifications || logs.length }}</div>
@@ -333,28 +604,28 @@ onMounted(() => {
               <span class="stat-title">Rata-rata Mutu Citra</span>
               <ShieldCheck :size="20" class="stat-icon text-peach" />
             </div>
-            <div class="stat-number">&gt; 85 dB</div>
+            <div class="stat-number">&gt; 80 dB</div>
             <div class="stat-foot">Standar Proposal (&ge; 45 dB)</div>
           </div>
         </div>
 
-        <!-- Navigation Tabs inside Studio -->
+        <!-- Studio Subtabs -->
         <div class="studio-tabs glass-card">
           <button
             class="s-tab-btn"
-            :class="{ active: activeSubTab === 'generator' }"
-            @click="activeSubTab = 'generator'"
+            :class="{ active: activeSubTab === 'recipients' }"
+            @click="activeSubTab = 'recipients'"
           >
-            <Award :size="16" />
-            <span>Penerbitan Tunggal</span>
+            <UserCheck :size="16" />
+            <span>Penerima &amp; Penerbitan (F-04, 05, 06)</span>
           </button>
           <button
             class="s-tab-btn"
-            :class="{ active: activeSubTab === 'bulk' }"
-            @click="activeSubTab = 'bulk'"
+            :class="{ active: activeSubTab === 'issued' }"
+            @click="activeSubTab = 'issued'"
           >
-            <FileSpreadsheet :size="16" />
-            <span>Penerbitan Massal (Bulk CSV)</span>
+            <Archive :size="16" />
+            <span>Unduh Berkas / ZIP (F-07)</span>
           </button>
           <button
             class="s-tab-btn"
@@ -362,7 +633,15 @@ onMounted(() => {
             @click="activeSubTab = 'events'"
           >
             <Calendar :size="16" />
-            <span>Manajemen Event</span>
+            <span>Manajemen Event (F-03)</span>
+          </button>
+          <button
+            class="s-tab-btn"
+            :class="{ active: activeSubTab === 'generator' }"
+            @click="activeSubTab = 'generator'"
+          >
+            <Award :size="16" />
+            <span>Penerbitan Cepat</span>
           </button>
           <button
             class="s-tab-btn"
@@ -370,17 +649,317 @@ onMounted(() => {
             @click="activeSubTab = 'logs'"
           >
             <Activity :size="16" />
-            <span>Log Audit Verifikasi</span>
+            <span>Log Audit Verifikasi (F-11)</span>
           </button>
         </div>
 
-        <!-- TAB 1: Single Generator -->
+        <!-- TAB 1: Recipients & Issuance (F-04, F-05, F-06) -->
+        <div v-if="activeSubTab === 'recipients'" class="tab-pane">
+          <div class="glass-card pane-card">
+            <!-- Event Selector & Action Bar -->
+            <div class="recipients-top-bar">
+              <div class="event-picker-box">
+                <label class="form-label">Pilih Agenda Kegiatan:</label>
+                <select v-model="selectedEventId" @change="handleEventChange" class="form-select event-select">
+                  <option v-for="e in events" :key="e.id" :value="e.id">
+                    {{ e.eventName }} ({{ e.eventDate }})
+                  </option>
+                </select>
+              </div>
+
+              <div class="recipients-actions">
+                <a href="/api/events/recipients/template-csv" download class="btn btn-secondary btn-sm">
+                  <Download :size="14" />
+                  <span>Unduh Templat CSV</span>
+                </a>
+                <button class="btn btn-secondary btn-sm" @click="showCsvImportModal = true">
+                  <FileSpreadsheet :size="14" />
+                  <span>Impor CSV (F-05)</span>
+                </button>
+                <button class="btn btn-primary btn-sm" @click="showAddRecipientModal = true">
+                  <PlusCircle :size="14" />
+                  <span>Tambah Penerima (F-04)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Issuance Action Ribbon -->
+            <div class="issuance-control-ribbon">
+              <div class="issuance-left">
+                <span class="sel-count">
+                  Terpilih: <strong>{{ selectedRecipientIds.length }}</strong> dari {{ selectedEventRecipients.filter(r => r.status === 'BELUM_TERBIT').length }} yang belum terbit
+                </span>
+                <select v-model="issueResolution" class="form-select form-select-sm" style="width: auto;">
+                  <option value="1080p">Resolusi Full HD (1920 &times; 1080 px)</option>
+                  <option value="300dpi">Resolusi A4 300 DPI (2480 &times; 1754 px)</option>
+                </select>
+              </div>
+              <button
+                class="btn btn-primary btn-sm"
+                :disabled="isIssuing || selectedEventRecipients.filter(r => r.status === 'BELUM_TERBIT').length === 0"
+                @click="handleIssueSelected"
+              >
+                <RefreshCw v-if="isIssuing" :size="14" class="spin-icon" />
+                <Award v-else :size="14" />
+                <span>{{ isIssuing ? 'Menghitung SHA-256 & Embedding LSB...' : 'Terbitkan Sertifikat (F-06)' }}</span>
+              </button>
+            </div>
+
+            <!-- Issue Result Banner -->
+            <div v-if="issueResult" class="issue-result-alert">
+              <CheckCircle2 :size="18" class="text-emerald" />
+              <div>
+                <strong>Penerbitan Selesai!</strong>
+                <span> {{ issueResult.successCount }} berhasil diterbitkan, {{ issueResult.failedCount }} gagal. Berkas PNG lossless siap diunduh.</span>
+              </div>
+            </div>
+
+            <!-- Recipients Table -->
+            <div class="table-wrap">
+              <table class="log-table">
+                <thead>
+                  <tr>
+                    <th style="width: 40px;">
+                      <input
+                        type="checkbox"
+                        @change="toggleSelectAllRecipients"
+                        :checked="selectedRecipientIds.length > 0 && selectedRecipientIds.length === selectedEventRecipients.filter(r => r.status === 'BELUM_TERBIT').length"
+                      />
+                    </th>
+                    <th>No. Sertifikat</th>
+                    <th>Nama Penerima</th>
+                    <th>NIM / Identifikasi</th>
+                    <th>Peran</th>
+                    <th>Status</th>
+                    <th>Hash SHA-256</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in selectedEventRecipients" :key="r.id">
+                    <td>
+                      <input
+                        type="checkbox"
+                        v-if="r.status === 'BELUM_TERBIT'"
+                        :value="r.id"
+                        v-model="selectedRecipientIds"
+                      />
+                    </td>
+                    <td class="font-mono text-gold">{{ r.certificateNumber }}</td>
+                    <td class="font-bold">{{ r.recipientName }}</td>
+                    <td class="font-mono">{{ r.recipientIdentifier }}</td>
+                    <td>{{ r.recipientRole }}</td>
+                    <td>
+                      <span
+                        class="badge"
+                        :class="r.status === 'TERBIT' ? 'badge-valid' : 'badge-brand'"
+                      >
+                        {{ r.status === 'TERBIT' ? 'Terbit' : 'Belum Terbit' }}
+                      </span>
+                    </td>
+                    <td class="font-mono text-xs">
+                      {{ r.sha256Hash ? r.sha256Hash.slice(0, 16) + '...' : '-' }}
+                    </td>
+                    <td>
+                      <a
+                        v-if="r.status === 'TERBIT'"
+                        :href="`/api/certificates/${r.id}/download`"
+                        download
+                        class="btn btn-secondary btn-sm"
+                        title="Unduh PNG Asli"
+                      >
+                        <Download :size="12" />
+                        <span>Unduh</span>
+                      </a>
+                      <span v-else class="text-faint text-xs">Menunggu terbit</span>
+                    </td>
+                  </tr>
+                  <tr v-if="selectedEventRecipients.length === 0">
+                    <td colspan="8" class="text-center text-muted">
+                      Belum ada data penerima untuk agenda ini. Gunakan tombol 'Tambah Penerima' atau 'Impor CSV'.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Issued Certs & Lossless ZIP Export (F-07) -->
+        <div v-if="activeSubTab === 'issued'" class="tab-pane">
+          <div class="glass-card pane-card">
+            <!-- Warning Banner from Spec F-07 -->
+            <div class="lossless-warning-banner">
+              <AlertTriangle :size="20" class="text-gold" />
+              <div>
+                <h4 class="warn-title">PENTING: Integritas Steganografi LSB</h4>
+                <p class="warn-desc">
+                  Kirim berkas e-sertifikat kepada penerima sebagai <strong>dokumen / berkas asli</strong> (bukan sebagai foto di WhatsApp atau media sosial) karena kompresi lossy JPEG/WebP merusak bit terendah (LSB) dan membatalkan keaslian sertifikat saat diverifikasi.
+                </p>
+              </div>
+            </div>
+
+            <div class="card-action-bar">
+              <div>
+                <h3 class="pane-title">Daftar E-Sertifikat Terbit</h3>
+                <p class="pane-sub">Pilih beberapa sertifikat untuk mengunduh arsip ZIP lossless (bit LSB utuh tanpa kompresi).</p>
+              </div>
+              <div class="btn-group">
+                <button
+                  class="btn btn-primary btn-sm"
+                  :disabled="isDownloadingZip || selectedIssuedCertIds.length === 0"
+                  @click="handleDownloadZip"
+                >
+                  <RefreshCw v-if="isDownloadingZip" :size="14" class="spin-icon" />
+                  <Archive v-else :size="14" />
+                  <span>Unduh ZIP ({{ selectedIssuedCertIds.length }} Terpilih)</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="log-table">
+                <thead>
+                  <tr>
+                    <th style="width: 40px;">
+                      <input
+                        type="checkbox"
+                        @change="toggleSelectAllIssued"
+                        :checked="selectedIssuedCertIds.length === certificates.length && certificates.length > 0"
+                      />
+                    </th>
+                    <th>Nomor Sertifikat</th>
+                    <th>Nama Penerima</th>
+                    <th>NIM / ID</th>
+                    <th>Agenda Kegiatan</th>
+                    <th>Kualitas (PSNR)</th>
+                    <th>Segel Hash SHA-256</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in certificates" :key="c.id">
+                    <td>
+                      <input type="checkbox" :value="c.id" v-model="selectedIssuedCertIds" />
+                    </td>
+                    <td class="font-mono text-gold">{{ c.certificateNumber }}</td>
+                    <td class="font-bold">{{ c.recipientName }}</td>
+                    <td class="font-mono">{{ c.recipientIdentifier }}</td>
+                    <td>{{ c.eventName }}</td>
+                    <td class="font-mono text-emerald">{{ c.psnr }} dB</td>
+                    <td class="font-mono text-xs">{{ c.sha256Hash?.slice(0, 16) }}...</td>
+                    <td>
+                      <a :href="`/api/certificates/${c.id}/download`" download class="btn btn-secondary btn-sm">
+                        <Download :size="13" />
+                        <span>PNG</span>
+                      </a>
+                    </td>
+                  </tr>
+                  <tr v-if="certificates.length === 0">
+                    <td colspan="8" class="text-center text-muted">Belum ada e-sertifikat yang diterbitkan.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Event Management (F-03) -->
+        <div v-if="activeSubTab === 'events'" class="tab-pane">
+          <div class="grid-2-col">
+            <!-- Create Event Form -->
+            <div class="glass-card pane-card">
+              <h3 class="pane-title">Tambah Agenda Kegiatan Baru</h3>
+              <p class="pane-sub">Unggah template sertifikat PNG (maks 10 MB) dengan magic bytes tervalidasi.</p>
+
+              <form @submit.prevent="handleCreateEvent" class="studio-form">
+                <div class="form-group">
+                  <label class="form-label">Nama Kegiatan</label>
+                  <input
+                    type="text"
+                    v-model="newEventForm.eventName"
+                    class="form-input"
+                    placeholder="Contoh: Seminar Nasional AI & Keamanan Digital 2026"
+                    required
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Tanggal Pelaksanaan</label>
+                  <input type="date" v-model="newEventForm.eventDate" class="form-input" required />
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Instansi Penyelenggara</label>
+                  <input type="text" v-model="newEventForm.organizer" class="form-input" required />
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Unggah Citra Template Sertifikat (Wajib PNG Lossless)</label>
+                  <input
+                    type="file"
+                    accept=".png,image/png"
+                    @change="(e) => (newEventTemplate = e.target.files[0])"
+                    class="form-input"
+                  />
+                  <small class="form-hint">Format PNG murni (maks 10 MB). Nama peserta akan dioverlay otomatis sebelum LSB embedding.</small>
+                </div>
+
+                <button type="submit" class="btn btn-primary" :disabled="isCreatingEvent">
+                  <RefreshCw v-if="isCreatingEvent" :size="16" class="spin-icon" />
+                  <PlusCircle v-else :size="16" />
+                  <span>Simpan Agenda Event</span>
+                </button>
+              </form>
+            </div>
+
+            <!-- Events List -->
+            <div class="glass-card pane-card">
+              <h3 class="pane-title">Daftar Agenda Kegiatan Terdaftar</h3>
+              <p class="pane-sub">Event dengan sertifikat terbit dilindungi dari penghapusan permanen (hanya dinonaktifkan).</p>
+
+              <div class="events-list">
+                <div v-for="evt in events" :key="evt.id" class="event-item glass-card">
+                  <div class="e-info">
+                    <div class="e-badge-row">
+                      <span class="badge" :class="evt.isActive !== false ? 'badge-valid' : 'badge-manipulated'">
+                        {{ evt.isActive !== false ? 'Aktif' : 'Nonaktif' }}
+                      </span>
+                      <span class="badge badge-brand">{{ evt.totalCertificates || 0 }} Sertifikat Terbit</span>
+                    </div>
+                    <h4 class="e-name">{{ evt.eventName }}</h4>
+                    <p class="e-sub">{{ evt.eventDate }} &bull; {{ evt.organizer }}</p>
+                  </div>
+
+                  <div class="e-actions">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      @click="handleToggleEventActive(evt)"
+                      :title="evt.isActive !== false ? 'Nonaktifkan Event' : 'Aktifkan Event'"
+                    >
+                      <Power :size="14" />
+                      <span>{{ evt.isActive !== false ? 'Nonaktifkan' : 'Aktifkan' }}</span>
+                    </button>
+                    <button
+                      class="btn btn-danger-sm"
+                      @click="handleDeleteEvent(evt)"
+                      title="Hapus Event"
+                    >
+                      <Trash2 :size="14" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 4: Instant Generator (Single) -->
         <div v-if="activeSubTab === 'generator'" class="tab-pane">
           <div class="grid-2-col">
-            <!-- Form Card -->
             <div class="glass-card pane-card">
-              <h3 class="pane-title">Penerbitan E-Sertifikat Tunggal</h3>
-              <p class="pane-sub">Secara otomatis menghasilkan intisari hash SHA-256 dan menyisipkan bit LSB pada citra PNG.</p>
+              <h3 class="pane-title">Penerbitan E-Sertifikat Cepat (Tunggal)</h3>
+              <p class="pane-sub">Secara instan menyisipkan segel integritas SHA-256 dan bit LSB pada citra PNG.</p>
 
               <form @submit.prevent="handleSingleGenerate" class="studio-form">
                 <div class="form-group">
@@ -417,14 +996,14 @@ onMounted(() => {
                   <div class="form-group">
                     <label class="form-label">Resolusi Citra E-Sertifikat</label>
                     <select v-model="genForm.resolution" class="form-select">
-                      <option value="1080p">Full HD (1920 × 1080 px) - Batch 1</option>
-                      <option value="300dpi">A4 Landscape (2480 × 1754 px, 300 DPI) - Batch 2</option>
+                      <option value="1080p">Full HD (1920 &times; 1080 px) - Batch 1</option>
+                      <option value="300dpi">A4 Landscape (2480 &times; 1754 px, 300 DPI) - Batch 2</option>
                     </select>
                   </div>
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">Nomor Sertifikat (Opsional, kosongkan untuk auto-generate)</label>
+                  <label class="form-label">Nomor Sertifikat (Opsional)</label>
                   <input
                     type="text"
                     v-model="genForm.certificateNumber"
@@ -434,190 +1013,111 @@ onMounted(() => {
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">Unggah Template Desain Kustom (Opsional, format PNG)</label>
+                  <label class="form-label">Template Kustom (Opsional, format PNG)</label>
                   <input
                     type="file"
                     accept=".png,image/png"
                     @change="handleCoverFileChange"
                     class="form-input"
                   />
-                  <small class="form-hint">Jika dikosongkan, template resmi UIN Sunan Ampel Surabaya akan digenerate otomatis.</small>
                 </div>
 
-                <div v-if="genError" class="login-error-alert">
-                  <AlertTriangle :size="16" />
-                  <span>{{ genError }}</span>
-                </div>
-
-                <button type="submit" class="btn btn-primary btn-block" :disabled="isGenerating">
+                <button type="submit" class="btn btn-primary" :disabled="isGenerating">
                   <RefreshCw v-if="isGenerating" :size="16" class="spin-icon" />
                   <Award v-else :size="16" />
-                  <span>{{ isGenerating ? 'Membangkitkan Hash & Menyisipkan LSB...' : 'Generate & Terbitkan E-Sertifikat' }}</span>
+                  <span>{{ isGenerating ? 'Memproses Steganografi LSB...' : 'Terbitkan Sekarang' }}</span>
                 </button>
               </form>
             </div>
 
-            <!-- Output Preview Card -->
+            <!-- Single Gen Result Card -->
             <div class="glass-card pane-card">
-              <h3 class="pane-title">Status Hasil Pembangkitan</h3>
-              <p class="pane-sub">Detail parameter kriptografi dan imperseptibilitas steganografi LSB.</p>
+              <h3 class="pane-title">Hasil Pembangkitan LSB</h3>
+              <div v-if="genResult" class="gen-result-content">
+                <div class="result-badge-row">
+                  <span class="badge badge-valid">
+                    <CheckCircle2 :size="13" />
+                    <span>LSB Embedding Sukses</span>
+                  </span>
+                  <span class="font-mono text-sm text-gold">{{ genResult.certificate.certificateNumber }}</span>
+                </div>
 
-              <div v-if="genResult" class="gen-output-box">
-                <div class="gen-success-badge">
-                  <CheckCircle2 :size="20" class="text-emerald" />
-                  <div>
-                    <h4>E-Sertifikat Berhasil Diterbitkan!</h4>
-                    <p>Payload metadata &amp; hash SHA-256 tersimpan di bit LSB.</p>
+                <div class="metrics-grid-compact">
+                  <div class="m-card">
+                    <span class="k">PSNR Kualitas</span>
+                    <span class="v text-emerald">{{ genResult.embedStats.psnr }} dB</span>
+                  </div>
+                  <div class="m-card">
+                    <span class="k">MSE Error</span>
+                    <span class="v">{{ genResult.embedStats.mse }}</span>
+                  </div>
+                  <div class="m-card">
+                    <span class="k">Waktu Komputasi</span>
+                    <span class="v text-gold">{{ genResult.embedStats.executionTimeMs }} ms</span>
+                  </div>
+                  <div class="m-card">
+                    <span class="k">Kapasitas Bit</span>
+                    <span class="v">{{ genResult.embedStats.payloadBitsCount }} bits</span>
                   </div>
                 </div>
 
-                <!-- Parameters list -->
-                <div class="param-grid">
-                  <div class="p-row">
-                    <span class="p-k">Nomor Sertifikat</span>
-                    <span class="p-v text-gold">{{ genResult.certificate.certificateNumber }}</span>
-                  </div>
-                  <div class="p-row">
-                    <span class="p-k">Nama Penerima</span>
-                    <span class="p-v">{{ genResult.certificate.recipientName }}</span>
-                  </div>
-                  <div class="p-row">
-                    <span class="p-k">Peak Signal-to-Noise Ratio (PSNR)</span>
-                    <span class="p-v text-emerald font-bold">{{ genResult.embedStats.psnr }} dB</span>
-                  </div>
-                  <div class="p-row">
-                    <span class="p-k">Mean Squared Error (MSE)</span>
-                    <span class="p-v font-mono">{{ genResult.embedStats.mse }}</span>
-                  </div>
-                  <div class="p-row">
-                    <span class="p-k">Penggunaan Kapasitas Spasial</span>
-                    <span class="p-v">{{ genResult.embedStats.payloadBitsCount }} bit ({{ genResult.embedStats.capacityUsagePercentage }}%)</span>
-                  </div>
-                  <div class="p-row">
-                    <span class="p-k">Waktu Komputasi</span>
-                    <span class="p-v">{{ genResult.embedStats.executionTimeMs }} ms</span>
-                  </div>
-                </div>
-
-                <!-- Hash block -->
                 <div class="hash-block">
                   <span class="hash-lbl">Nilai Intisari Kriptografis (SHA-256 Digest):</span>
                   <div class="code-box">{{ genResult.embedStats.sha256Hash }}</div>
                 </div>
 
-                <div class="gen-action-btns">
-                  <a
-                    :href="`/api/certificates/${genResult.certificate.id}/download`"
-                    download
-                    class="btn btn-primary btn-block"
-                  >
-                    <Download :size="16" />
-                    <span>Unduh Berkas Stego PNG Asli</span>
-                  </a>
-                </div>
+                <a
+                  :href="`/api/certificates/${genResult.certificate.id}/download`"
+                  download
+                  class="btn btn-primary btn-block"
+                >
+                  <Download :size="16" />
+                  <span>Unduh Berkas Stego PNG Asli</span>
+                </a>
               </div>
-
               <div v-else class="empty-gen-state">
                 <Award :size="48" class="text-faint" />
-                <p>Isi formulir di sebelah kiri dan klik tombol terbitkan untuk melihat parameter steganografi dan mengunduh sertifikat.</p>
+                <p>Isi formulir dan klik terbitkan untuk melihat parameter matematis LSB.</p>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- TAB 2: Bulk CSV Generator -->
-        <div v-if="activeSubTab === 'bulk'" class="tab-pane">
-          <div class="glass-card pane-card">
-            <h3 class="pane-title">Penerbitan Massal (Bulk CSV Import)</h3>
-            <p class="pane-sub">Terbitkan puluhan sertifikat sekaligus untuk peserta kegiatan dengan satu kali klik.</p>
-
-            <div class="form-group">
-              <label class="form-label">Pilih Agenda Kegiatan</label>
-              <select v-model="bulkEventId" class="form-select" required>
-                <option v-for="e in events" :key="e.id" :value="e.id">{{ e.eventName }}</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Daftar Penerima (Format: Nama,NIM,Peran per baris)</label>
-              <textarea v-model="bulkCsvText" rows="6" class="form-textarea font-mono"></textarea>
-            </div>
-
-            <button
-              class="btn btn-primary"
-              :disabled="isBulkProcessing"
-              @click="handleBulkGenerate"
-            >
-              <RefreshCw v-if="isBulkProcessing" :size="16" class="spin-icon" />
-              <FileSpreadsheet v-else :size="16" />
-              <span>{{ isBulkProcessing ? 'Memproses Seluruh Sertifikat...' : 'Proses Penerbitan Massal' }}</span>
-            </button>
-
-            <!-- Bulk Result -->
-            <div v-if="bulkResult" class="bulk-result-box">
-              <h4 class="text-emerald">Penerbitan Massal Selesai!</h4>
-              <p>Berhasil diterbitkan: <strong>{{ bulkResult.totalSuccess }}</strong> | Gagal: {{ bulkResult.totalFailed }}</p>
-              <div class="bulk-list">
-                <div v-for="c in bulkResult.items" :key="c.id" class="bulk-item">
-                  <span>{{ c.recipientName }} ({{ c.recipientIdentifier }})</span>
-                  <a :href="`/api/certificates/${c.id}/download`" download class="btn btn-secondary btn-sm">
-                    <Download :size="13" />
-                    <span>Unduh PNG</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 3: Event Management -->
-        <div v-if="activeSubTab === 'events'" class="tab-pane">
-          <div class="grid-2-col">
-            <!-- Create Event -->
-            <div class="glass-card pane-card">
-              <h3 class="pane-title">Tambah Agenda / Seminar Baru</h3>
-              <form @submit.prevent="handleCreateEvent" class="studio-form">
-                <div class="form-group">
-                  <label class="form-label">Nama Kegiatan</label>
-                  <input type="text" v-model="newEventForm.eventName" class="form-input" placeholder="Contoh: Seminar Nasional AI 2026" required />
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Tanggal Pelaksanaan</label>
-                  <input type="date" v-model="newEventForm.eventDate" class="form-input" required />
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Instansi Penyelenggara</label>
-                  <input type="text" v-model="newEventForm.organizer" class="form-input" required />
-                </div>
-                <button type="submit" class="btn btn-primary" :disabled="isCreatingEvent">
-                  <PlusCircle :size="16" />
-                  <span>Simpan Agenda</span>
-                </button>
-              </form>
-            </div>
-
-            <!-- Event List -->
-            <div class="glass-card pane-card">
-              <h3 class="pane-title">Daftar Agenda Kegiatan Terdaftar</h3>
-              <div class="events-list">
-                <div v-for="evt in events" :key="evt.id" class="event-item">
-                  <div>
-                    <h4 class="e-name">{{ evt.eventName }}</h4>
-                    <p class="e-sub">{{ evt.eventDate }} • {{ evt.organizer }}</p>
-                  </div>
-                  <span class="badge badge-brand">{{ evt.totalCertificates || 0 }} Sertifikat</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 4: Audit Logs -->
+        <!-- TAB 5: Verification Audit Logs (F-11) -->
         <div v-if="activeSubTab === 'logs'" class="tab-pane">
           <div class="glass-card pane-card">
-            <h3 class="pane-title">Log Audit Riwayat Verifikasi Publik</h3>
-            <p class="pane-sub">Catatan audit transparan setiap upaya verifikasi e-sertifikat yang masuk ke sistem.</p>
+            <!-- Filter & Action Bar -->
+            <div class="logs-filter-bar">
+              <div class="filter-inputs">
+                <select v-model="logStatusFilter" @change="loadLogs" class="form-select form-select-sm">
+                  <option value="">Semua Status Validasi</option>
+                  <option value="ASLI_VALID">ASLI_VALID (Integritas Cocok)</option>
+                  <option value="MANIPULASI_TERDETEKSI">MANIPULASI_TERDETEKSI (Integritas Rusak)</option>
+                  <option value="FORMAT_TIDAK_VALID">FORMAT_TIDAK_VALID (Non-PNG / Corrupt)</option>
+                </select>
 
+                <input
+                  type="text"
+                  v-model="logSearchQuery"
+                  @keyup.enter="loadLogs"
+                  placeholder="Cari NIM, No. Sertifikat, IP..."
+                  class="form-input form-input-sm"
+                  style="max-width: 250px;"
+                />
+
+                <button class="btn btn-secondary btn-sm" @click="loadLogs">
+                  <Filter :size="13" />
+                  <span>Saring</span>
+                </button>
+              </div>
+
+              <button class="btn btn-primary btn-sm" @click="handleExportLogsCsv">
+                <Download :size="14" />
+                <span>Ekspor CSV Log (F-11)</span>
+              </button>
+            </div>
+
+            <!-- Logs Table -->
             <div class="table-wrap">
               <table class="log-table">
                 <thead>
@@ -627,6 +1127,7 @@ onMounted(() => {
                     <th>No. Sertifikat</th>
                     <th>Nama Tertera</th>
                     <th>Status Validasi</th>
+                    <th>Latensi</th>
                     <th>Keterangan Sistem</th>
                   </tr>
                 </thead>
@@ -642,20 +1143,151 @@ onMounted(() => {
                         :class="{
                           'badge-valid': log.verificationStatus === 'ASLI_VALID',
                           'badge-manipulated': log.verificationStatus === 'MANIPULASI_TERDETEKSI',
+                          'badge-brand': log.verificationStatus === 'FORMAT_TIDAK_VALID',
                         }"
                       >
                         {{ log.verificationStatus }}
                       </span>
                     </td>
+                    <td class="font-mono">{{ log.tVerifMs ? `${log.tVerifMs} ms` : '-' }}</td>
                     <td class="text-muted text-sm">{{ log.message }}</td>
                   </tr>
                   <tr v-if="logs.length === 0">
-                    <td colspan="6" class="text-center text-muted">Belum ada riwayat verifikasi.</td>
+                    <td colspan="7" class="text-center text-muted">Belum ada riwayat verifikasi yang sesuai kriteria.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal F-04: Tambah Calon Penerima Individual -->
+    <div v-if="showAddRecipientModal" class="modal-backdrop" @click="showAddRecipientModal = false">
+      <div class="modal-dialog glass-card" @click.stop style="max-width: 500px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Tambah Calon Penerima (F-04)</h3>
+          <button class="close-btn" @click="showAddRecipientModal = false">&times;</button>
+        </div>
+        <form @submit.prevent="handleAddRecipient" class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Nama Lengkap Penerima</label>
+            <input type="text" v-model="newRecipientForm.recipientName" class="form-input" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">NIM / Identifikasi Mahasiswa</label>
+            <input type="text" v-model="newRecipientForm.recipientIdentifier" class="form-input" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Peran Partisipasi</label>
+            <select v-model="newRecipientForm.recipientRole" class="form-select">
+              <option value="Peserta">Peserta</option>
+              <option value="Pemateri">Pemateri</option>
+              <option value="Moderator">Moderator</option>
+              <option value="Panitia Penyelenggara">Panitia Penyelenggara</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nomor Sertifikat (Opsional, unik)</label>
+            <input type="text" v-model="newRecipientForm.certificateNumber" class="form-input" placeholder="Otomatis digenerate jika kosong" />
+          </div>
+
+          <div v-if="addRecipientError" class="login-error-alert">
+            <AlertTriangle :size="15" />
+            <span>{{ addRecipientError }}</span>
+          </div>
+
+          <div class="modal-footer" style="padding-top: 15px;">
+            <button type="button" class="btn btn-secondary" @click="showAddRecipientModal = false">Batal</button>
+            <button type="submit" class="btn btn-primary" :disabled="isAddingRecipient">
+              <span>{{ isAddingRecipient ? 'Menyimpan...' : 'Simpan Penerima' }}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal F-05: Impor Massal CSV dengan Pratinjau -->
+    <div v-if="showCsvImportModal" class="modal-backdrop" @click="showCsvImportModal = false">
+      <div class="modal-dialog glass-card" @click.stop style="max-width: 650px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Impor Massal Penerima CSV (F-05)</h3>
+          <button class="close-btn" @click="showCsvImportModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="pane-sub">Unggah berkas CSV atau tempel teks data penerima (Maks. 500 baris).</p>
+
+          <div class="form-group">
+            <label class="form-label">Pilih Berkas CSV:</label>
+            <input type="file" accept=".csv,text/csv" @change="handleCsvFileChange" class="form-input" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Atau Tempel Teks CSV (Format: nomor_sertifikat,nama,nim_email,peran):</label>
+            <textarea v-model="csvTextInput" rows="5" class="form-textarea font-mono"></textarea>
+          </div>
+
+          <div class="btn-group" style="margin-bottom: 15px;">
+            <button class="btn btn-secondary btn-sm" :disabled="isPreviewingCsv" @click="handlePreviewCsv">
+              <RefreshCw v-if="isPreviewingCsv" :size="13" class="spin-icon" />
+              <Eye v-else :size="13" />
+              <span>Pratinjau Validasi Baris</span>
+            </button>
+          </div>
+
+          <!-- Preview Results Box -->
+          <div v-if="csvPreviewData" class="csv-preview-box">
+            <div class="preview-badge-row">
+              <span class="badge badge-valid">{{ csvPreviewData.validCount }} Baris Valid</span>
+              <span v-if="csvPreviewData.invalidCount > 0" class="badge badge-manipulated">
+                {{ csvPreviewData.invalidCount }} Baris Bermasalah
+              </span>
+            </div>
+
+            <div class="preview-scroll-table">
+              <table class="log-table" style="font-size: 0.8rem;">
+                <thead>
+                  <tr>
+                    <th>Baris</th>
+                    <th>Nomor</th>
+                    <th>Nama</th>
+                    <th>NIM/ID</th>
+                    <th>Status Baris</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in csvPreviewData.rows" :key="row.rowNumber">
+                    <td class="font-mono">{{ row.rowNumber }}</td>
+                    <td class="font-mono">{{ row.certificateNumber }}</td>
+                    <td>{{ row.recipientName }}</td>
+                    <td class="font-mono">{{ row.recipientIdentifier }}</td>
+                    <td>
+                      <span v-if="row.isValid" class="text-emerald font-bold">&check; Valid</span>
+                      <span v-else class="text-danger font-bold">&cross; {{ row.errorMessage }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div v-if="csvImportError" class="login-error-alert" style="margin-top: 10px;">
+            <AlertTriangle :size="15" />
+            <span>{{ csvImportError }}</span>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showCsvImportModal = false">Tutup</button>
+          <button
+            class="btn btn-primary"
+            :disabled="isImportingCsv || !csvPreviewData || csvPreviewData.validCount === 0"
+            @click="handleExecuteCsvImport"
+          >
+            <RefreshCw v-if="isImportingCsv" :size="14" class="spin-icon" />
+            <span>Simpan {{ csvPreviewData?.validCount || 0 }} Baris Valid</span>
+          </button>
         </div>
       </div>
     </div>
@@ -738,7 +1370,7 @@ onMounted(() => {
   color: var(--c-fd);
 }
 
-/* Dashboard */
+/* Dashboard Header */
 .dash-header {
   display: flex;
   justify-content: space-between;
@@ -750,10 +1382,11 @@ onMounted(() => {
   font-size: 2.1rem;
   font-weight: 800;
   color: #FFFFFF;
+  margin-top: 4px;
 }
 
 .dash-sub {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   color: var(--text-muted);
 }
 
@@ -761,26 +1394,26 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: var(--bg-card);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 8px 16px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
 }
 
 .u-avatar {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--grad-primary);
   color: #FFFFFF;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 800;
 }
 
 .u-name {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: #FFFFFF;
 }
@@ -788,21 +1421,19 @@ onMounted(() => {
 .u-role {
   font-size: 0.7rem;
   color: var(--c-fd);
-  font-weight: 700;
+  font-weight: 800;
 }
 
-/* Stats */
+/* Stats Row */
 .stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 30px;
 }
 
 .stat-box {
   padding: 20px;
-  display: flex;
-  flex-direction: column;
 }
 
 .stat-top {
@@ -819,24 +1450,24 @@ onMounted(() => {
 }
 
 .stat-number {
-  font-size: 2rem;
+  font-size: 1.9rem;
   font-weight: 800;
   color: #FFFFFF;
-  font-family: var(--font-mono);
+  margin-bottom: 4px;
 }
 
 .stat-foot {
   font-size: 0.72rem;
   color: var(--text-faint);
-  margin-top: 4px;
 }
 
 /* Studio Tabs */
 .studio-tabs {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   padding: 6px;
   margin-bottom: 24px;
+  overflow-x: auto;
 }
 
 .s-tab-btn {
@@ -844,15 +1475,16 @@ onMounted(() => {
   border: none;
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   font-weight: 600;
-  padding: 10px 18px;
-  border-radius: var(--radius-md);
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.2s ease;
+  white-space: nowrap;
+  transition: all 0.2s;
 }
 
 .s-tab-btn:hover {
@@ -861,23 +1493,12 @@ onMounted(() => {
 }
 
 .s-tab-btn.active {
-  background: var(--grad-primary);
-  color: #FFFFFF;
+  background: rgba(235, 137, 91, 0.2);
+  color: var(--c-fd);
+  border: 1px solid rgba(235, 137, 91, 0.4);
 }
 
-/* Pane */
-.grid-2-col {
-  display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
-  gap: 24px;
-}
-
-.grid-2-col-sm {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-
+/* Panes */
 .pane-card {
   padding: 26px;
 }
@@ -890,119 +1511,108 @@ onMounted(() => {
 }
 
 .pane-sub {
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
   margin-bottom: 20px;
 }
 
-.form-hint {
-  font-size: 0.74rem;
-  color: var(--text-faint);
-  margin-top: 4px;
+.grid-2-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
 }
 
-.gen-output-box {
+.grid-2-col-sm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Recipients Top Bar */
+.recipients-top-bar {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.event-picker-box {
+  flex: 1;
+  min-width: 280px;
+}
+
+.recipients-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issuance-control-ribbon {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  margin-bottom: 16px;
+}
+
+.issuance-left {
+  display: flex;
+  align-items: center;
   gap: 16px;
 }
 
-.gen-success-badge {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 12px;
-  border-radius: var(--radius-sm);
-}
-
-.gen-success-badge h4 {
-  font-size: 0.95rem;
-  color: #34D399;
-}
-
-.gen-success-badge p {
-  font-size: 0.76rem;
+.sel-count {
+  font-size: 0.85rem;
   color: var(--text-muted);
 }
 
-.param-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 12px;
-  border-radius: var(--radius-sm);
+.sel-count strong {
+  color: var(--c-fd);
 }
 
-.p-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.82rem;
-}
-
-.p-k {
-  color: var(--text-muted);
-}
-
-.p-v {
-  font-weight: 700;
-  color: #FFFFFF;
-}
-
-.hash-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.hash-lbl {
-  font-size: 0.74rem;
-  color: var(--text-faint);
-  font-weight: 600;
-}
-
-.empty-gen-state {
-  text-align: center;
-  padding: 60px 20px;
-  color: var(--text-faint);
-  font-size: 0.88rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-/* Bulk */
-.bulk-result-box {
-  margin-top: 20px;
-  background: rgba(16, 185, 129, 0.08);
+.issue-result-alert {
+  padding: 12px 16px;
+  background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 16px;
   border-radius: var(--radius-md);
-}
-
-.bulk-list {
+  color: #A7F3D0;
+  font-size: 0.85rem;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  max-height: 250px;
-  overflow-y: auto;
-}
-
-.bulk-item {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 0.84rem;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
-/* Events */
+.lossless-warning-banner {
+  padding: 14px 18px;
+  background: rgba(253, 183, 115, 0.08);
+  border: 1px solid rgba(253, 183, 115, 0.25);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.warn-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--c-fd);
+  margin-bottom: 4px;
+}
+
+.warn-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* Event List */
 .events-list {
   display: flex;
   flex-direction: column;
@@ -1010,63 +1620,233 @@ onMounted(() => {
 }
 
 .event-item {
+  padding: 14px 18px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 14px;
+}
+
+.e-badge-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .e-name {
   font-size: 0.95rem;
   font-weight: 700;
   color: #FFFFFF;
+  margin-bottom: 2px;
 }
 
 .e-sub {
-  font-size: 0.76rem;
-  color: var(--text-faint);
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
-/* Table */
+.e-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-danger-sm {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #F87171;
+  padding: 6px 10px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.btn-danger-sm:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+/* Logs Filter */
+.logs-filter-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Table styles */
 .table-wrap {
   overflow-x: auto;
-  margin-top: 14px;
 }
 
 .log-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.84rem;
+  font-size: 0.85rem;
 }
 
 .log-table th {
   text-align: left;
-  padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.4);
-  color: var(--text-faint);
-  font-weight: 700;
-  font-size: 0.74rem;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .log-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #E2E8F0;
 }
 
-.text-gold { color: var(--c-fd); }
-.text-coral { color: var(--c-da); }
-.text-peach { color: var(--c-eb); }
-.text-emerald { color: #34D399; }
-.font-bold { font-weight: 700; }
-.spin-icon { animation: spin 1s infinite linear; }
+/* Modal styles */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(10px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
 
-@media (max-width: 992px) {
-  .stats-row { grid-template-columns: 1fr 1fr; }
-  .grid-2-col { grid-template-columns: 1fr; }
+.modal-dialog {
+  width: 100%;
+  padding: 24px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.modal-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.csv-preview-box {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.preview-badge-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.preview-scroll-table {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Single Gen Result */
+.gen-result-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.result-badge-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metrics-grid-compact {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.m-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+}
+
+.m-card .k {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.m-card .v {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.hash-block {
+  background: #090708;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.hash-lbl {
+  font-size: 0.72rem;
+  color: var(--c-fd);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.code-box {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: #E2E8F0;
+  word-break: break-all;
+}
+
+.empty-gen-state {
+  text-align: center;
+  padding: 50px 20px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+@media (max-width: 900px) {
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .grid-2-col {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
