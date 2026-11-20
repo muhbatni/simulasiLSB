@@ -151,7 +151,7 @@ export class CertificateGeneratorService {
   }
 
   /**
-   * Menimpa (overlay) teks nama penerima, nomor, dan peran pada template PNG (F-06 Catatan)
+   * Menimpa (overlay) teks nama penerima, nomor, dan peran pada template PNG
    */
   async overlayTextOnTemplate(
     templateBuffer: Buffer,
@@ -187,7 +187,7 @@ export class CertificateGeneratorService {
           ${this.escapeXml(params.kegiatan)}
         </text>
         <text y="${80 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${17 * scale}" fill="#666666">
-          ${this.escapeXml(params.tanggal)} &bull; ${this.escapeXml(params.lembaga)}
+          ${this.escapeXml(params.tanggal)} &#8226; ${this.escapeXml(params.lembaga)}
         </text>
       </g>
     </svg>

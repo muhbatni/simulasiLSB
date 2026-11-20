@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import axios from 'axios'
+import api from '../services/api'
 import confetti from 'canvas-confetti'
 import {
   UploadCloud,
@@ -17,7 +17,7 @@ import {
   Cpu,
   Layers,
   Zap
-} from '@lucide/vue'
+} from 'lucide-vue-next'
 
 const emit = defineEmits(['navigate-tab', 'open-login'])
 
@@ -81,7 +81,7 @@ const verifyCertificate = async () => {
     const formData = new FormData()
     formData.append('certificateImage', selectedFile.value)
 
-    const response = await axios.post('/api/verification/verify', formData, {
+    const response = await api.post('/verification/verify', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
 
@@ -112,10 +112,10 @@ const loadSampleCertificate = async (type = 'valid') => {
   verificationResult.value = null
 
   try {
-    const certsRes = await axios.get('/api/certificates')
+    const certsRes = await api.get('/certificates')
     if (certsRes.data && certsRes.data.length > 0) {
       const sample = certsRes.data[0]
-      const fileRes = await axios.get(`/api/certificates/${sample.id}/download`, {
+      const fileRes = await api.get(`/certificates/${sample.id}/download`, {
         responseType: 'blob',
       })
 
@@ -137,7 +137,7 @@ const loadSampleCertificate = async (type = 'valid') => {
       errorMessage.value = 'Belum ada data sertifikat contoh di server. Silakan login admin dan terbitkan sertifikat.'
     }
   } catch (err) {
-    errorMessage.value = 'Gagal memuat sampel: ' + (err.message || 'Error')
+    errorMessage.value = 'Gagal memuat sampel: ' + (err.response?.data?.message || err.message || 'Error')
   } finally {
     isVerifying.value = false
   }
@@ -378,6 +378,18 @@ const loadSampleCertificate = async (type = 'valid') => {
                 </div>
                 <div class="code-box seal-code">
                   {{ verificationResult.storedHash }}
+                </div>
+                <div v-if="verificationResult.canvasHash" class="seal-top" style="margin-top: 14px;">
+                  <span class="seal-title">Canvas Hash Piksel (Integritas Visual Kanvas):</span>
+                  <span
+                    class="badge"
+                    :class="verificationResult.canvasHashMatch !== false ? 'badge-valid' : 'badge-tampered'"
+                  >
+                    {{ verificationResult.canvasHashMatch !== false ? 'KANVAS ASLI & COCOK' : 'MANIPULASI KANVAS TERDETEKSI' }}
+                  </span>
+                </div>
+                <div v-if="verificationResult.canvasHash" class="code-box seal-code font-mono">
+                  {{ verificationResult.canvasHash }}
                 </div>
                 <div class="seal-footer">
                   <span>Waktu komputasi ekstraksi: <strong>{{ verificationResult.executionTimeMs }} ms</strong></span>

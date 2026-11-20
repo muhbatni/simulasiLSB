@@ -2,7 +2,7 @@ import { HashCryptoService } from '../src/security/hash-crypto.service';
 import { LsbSteganoService, CertificateMetadata } from '../src/security/lsb-stego.service';
 import sharp from 'sharp';
 
-describe('Unit Test Modul Kriptografi & Steganografi LSB (NF-11)', () => {
+describe('Unit Test Modul Kriptografi & Steganografi LSB', () => {
   let hashService: HashCryptoService;
   let lsbService: LsbSteganoService;
 
@@ -35,21 +35,28 @@ describe('Unit Test Modul Kriptografi & Steganografi LSB (NF-11)', () => {
     });
   });
 
-  describe('2. Sanitasi Delimiter (# dan @) sesuai Spesifikasi 4.3 & F-04', () => {
-    it('harus me-replace karakter # menjadi %23 dan @ menjadi %40', () => {
-      const rawText = 'Sertifikat #01 @Event_UINSA';
+  describe('2. Sanitasi Delimiter (#, @, %) dan Pencegahan Double-Unescape', () => {
+    it('harus me-replace karakter # menjadi %23 dan @ menjadi %40 serta % menjadi %25', () => {
+      const rawText = 'Sertifikat #01 @Event_UINSA 100% Asli';
       const escaped = lsbService.escapeField(rawText);
 
-      expect(escaped).toBe('Sertifikat %2301 %40Event_UINSA');
+      expect(escaped).toBe('Sertifikat %2301 %40Event_UINSA 100%25 Asli');
       expect(escaped).not.toContain('#');
       expect(escaped).not.toContain('@');
 
       const unescaped = lsbService.unescapeField(escaped);
       expect(unescaped).toBe(rawText);
     });
+
+    it('harus mencegah terjadinya double-unescape pada input seperti %2523', () => {
+      // Input %2523 jika di-unescape tidak boleh langsung meloncat menjadi '#'
+      const input = '%2523';
+      const unescaped = lsbService.unescapeField(input);
+      expect(unescaped).toBe('%23');
+    });
   });
 
-  describe('3. LsbSteganoService (Operasi Bitwise, Embedding & Extraction)', () => {
+  describe('3. LsbSteganoService (Operasi Bitwise, Embedding, Ekstraksi UTF-8, dan Canvas Hash)', () => {
     let dummyPngBuffer: Buffer;
 
     beforeAll(async () => {
@@ -88,6 +95,8 @@ describe('Unit Test Modul Kriptografi & Steganografi LSB (NF-11)', () => {
       expect(embedRes.stegoBuffer).toBeDefined();
       expect(embedRes.mse).toBeLessThan(0.05);
       expect(embedRes.psnr).toBeGreaterThanOrEqual(45.0);
+      expect(embedRes.canvasHash).toBeDefined();
+      expect(embedRes.canvasHash.length).toBe(64);
 
       // Verifikasi ekstraksi
       const verifRes = await lsbService.extractAndVerify(embedRes.stegoBuffer);
@@ -95,11 +104,82 @@ describe('Unit Test Modul Kriptografi & Steganografi LSB (NF-11)', () => {
       expect(verifRes.isValid).toBe(true);
       expect(verifRes.status).toBe('ASLI_VALID');
       expect(verifRes.hashMatch).toBe(true);
+      expect(verifRes.canvasHash).toBe(embedRes.canvasHash);
       expect(verifRes.metadata?.nama).toBe(metadata.nama);
       expect(verifRes.metadata?.nomor).toBe(metadata.nomor);
     });
 
-    it('harus mendeteksi manipulasi jika piksel diubah (Tamper Detection)', async () => {
+    it('harus mendukung karakter multi-byte UTF-8 (aksen, tanda kutip, dash, gelar M.Kom, nama Arab, emoji) tanpa korupsi', async () => {
+      const utf8Metadata: CertificateMetadata = {
+        nomor: 'UINSA/UTF8/2026/001',
+        nama: 'José Núñez, M.Kom “Juara 1” – عبد الله 🎓',
+        peran: 'Peserta & Pemateri',
+        kegiatan: 'Simposium Internasional Kripto & AI',
+        tanggal: '2026-10-25',
+        lembaga: 'FST UIN Sunan Ampel Surabaya',
+      };
+
+      const embedRes = await lsbService.embedPayload(dummyPngBuffer, utf8Metadata);
+      expect(embedRes.stegoBuffer).toBeDefined();
+
+      const verifRes = await lsbService.extractAndVerify(embedRes.stegoBuffer);
+      expect(verifRes.isValid).toBe(true);
+      expect(verifRes.status).toBe('ASLI_VALID');
+      expect(verifRes.hashMatch).toBe(true);
+      expect(verifRes.metadata?.nama).toBe(utf8Metadata.nama);
+    });
+
+    it('harus menghasilkan Canvas Hash yang konsisten sebelum dan sesudah embedding', async () => {
+      // Ratakan cover ke latar putih terlebih dahulu
+      const coverFlattened = await sharp(dummyPngBuffer)
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
+        .png({ compressionLevel: 9, palette: false })
+        .toBuffer();
+
+      const coverCanvasHash = await lsbService.computeCanvasHash(coverFlattened);
+
+      const metadata: CertificateMetadata = {
+        nomor: 'UINSA/CANVAS/001',
+        nama: 'Test Canvas Hash',
+        peran: 'Peserta',
+        kegiatan: 'Uji Integritas Kanvas',
+        tanggal: '2026-10-25',
+        lembaga: 'FST UINSA',
+      };
+
+      const embedRes = await lsbService.embedPayload(coverFlattened, metadata);
+
+      // Canvas hash stego harus sama dengan canvas hash cover karena LSB dinolkan
+      expect(embedRes.canvasHash).toBe(coverCanvasHash);
+
+      const verifRes = await lsbService.extractAndVerify(embedRes.stegoBuffer);
+      expect(verifRes.canvasHash).toBe(coverCanvasHash);
+    });
+
+    it('harus mendeteksi perubahan visual kanvas melalui Canvas Hash meskipun di luar area payload', async () => {
+      const metadata: CertificateMetadata = {
+        nomor: 'UINSA/CANVAS/TAMPER/001',
+        nama: 'Ahmad Fauzi',
+        peran: 'Peserta',
+        kegiatan: 'Workshop Keamanan',
+        tanggal: '2026-10-25',
+        lembaga: 'FST UINSA',
+      };
+
+      const embedRes = await lsbService.embedPayload(dummyPngBuffer, metadata);
+
+      // Modifikasi piksel di koordinat (80, 80) yang jauh dari awal payload
+      const tamperedCanvas = await lsbService.tamperPixel(embedRes.stegoBuffer, 80, 80, 10, {
+        r: 255,
+        g: 0,
+        b: 0,
+      });
+
+      const tamperedCanvasHash = await lsbService.computeCanvasHash(tamperedCanvas);
+      expect(tamperedCanvasHash).not.toBe(embedRes.canvasHash);
+    });
+
+    it('harus mendeteksi manipulasi jika piksel stego diubah (Tamper Detection)', async () => {
       const metadata: CertificateMetadata = {
         nomor: 'UINSA/TAMPER/001',
         nama: 'Budi Santoso',
@@ -111,8 +191,8 @@ describe('Unit Test Modul Kriptografi & Steganografi LSB (NF-11)', () => {
 
       const embedRes = await lsbService.embedPayload(dummyPngBuffer, metadata);
 
-      // Manipulasi piksel pada buffer stego
-      const tampered = lsbService.tamperPixel(embedRes.stegoBuffer, 0, 0, 10);
+      // Manipulasi piksel pada buffer stego (di area payload awal)
+      const tampered = await lsbService.tamperPixel(embedRes.stegoBuffer, 0, 0, 10);
 
       const verifRes = await lsbService.extractAndVerify(tampered);
 

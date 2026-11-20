@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import axios from 'axios'
+import api from '../services/api'
 import {
   Search,
   Download,
@@ -17,7 +17,7 @@ import {
   LogIn,
   AlertTriangle,
   UserCheck
-} from '@lucide/vue'
+} from 'lucide-vue-next'
 
 const props = defineProps({
   user: { type: Object, default: null },
@@ -30,19 +30,14 @@ const searchQuery = ref(props.initialQuery || '')
 const certificates = ref([])
 const isLoading = ref(false)
 const selectedPreviewCert = ref(null)
+const previewImageUrl = ref(null)
 
 // Server-side Verification State (F-08 Skenario 4)
 const isVerifyingStored = ref(false)
 const storedVerificationResult = ref(null)
 
-const authHeaders = () => {
-  const token = localStorage.getItem('lsb_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
 const loadMyCertificates = async () => {
-  const token = localStorage.getItem('lsb_token')
-  if (!token) {
+  if (!localStorage.getItem('lsb_token')) {
     certificates.value = []
     return
   }
@@ -50,9 +45,7 @@ const loadMyCertificates = async () => {
   isLoading.value = true
   try {
     const qParam = searchQuery.value.trim() ? `?q=${encodeURIComponent(searchQuery.value.trim())}` : ''
-    const res = await axios.get(`/api/me/certificates${qParam}`, {
-      headers: authHeaders(),
-    })
+    const res = await api.get(`/me/certificates${qParam}`)
     certificates.value = res.data
   } catch (err) {
     console.error('Gagal memuat sertifikat mahasiswa:', err)
@@ -62,14 +55,47 @@ const loadMyCertificates = async () => {
   }
 }
 
-const openPreview = (cert) => {
+const openPreview = async (cert) => {
   selectedPreviewCert.value = cert
   storedVerificationResult.value = null
+  previewImageUrl.value = null
+
+  try {
+    const res = await api.get(`/certificates/${cert.id}/download`, {
+      responseType: 'blob',
+    })
+    previewImageUrl.value = URL.createObjectURL(res.data)
+  } catch (e) {
+    console.warn('Gagal memuat pratinjau gambar:', e)
+  }
 }
 
 const closePreview = () => {
+  if (previewImageUrl.value) {
+    URL.revokeObjectURL(previewImageUrl.value)
+  }
   selectedPreviewCert.value = null
   storedVerificationResult.value = null
+  previewImageUrl.value = null
+}
+
+const downloadCertificate = async (cert) => {
+  try {
+    const res = await api.get(`/certificates/${cert.id}/download`, {
+      responseType: 'blob',
+    })
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'image/png' }))
+    const link = document.createElement('a')
+    link.href = url
+    const safeFilename = `Sertifikat-${cert.recipientName.replace(/[^a-zA-Z0-9_-]/g, '_')}-${cert.certificateNumber.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`
+    link.setAttribute('download', safeFilename)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch (err) {
+    alert(err.response?.data?.message || 'Gagal mengunduh berkas sertifikat')
+  }
 }
 
 // F-08 Skenario 4: Klik Verifikasi untuk mengekstrak dan memvalidasi berkas tersimpan
@@ -77,11 +103,7 @@ const verifyStoredCertificate = async (certId) => {
   isVerifyingStored.value = true
   storedVerificationResult.value = null
   try {
-    const res = await axios.post(
-      `/api/me/certificates/${certId}/verify`,
-      {},
-      { headers: authHeaders() }
-    )
+    const res = await api.post(`/me/certificates/${certId}/verify`, {})
     storedVerificationResult.value = res.data
   } catch (err) {
     alert(err.response?.data?.message || 'Gagal memverifikasi berkas sertifikat di peladen')
@@ -216,14 +238,14 @@ onMounted(() => {
                 <Eye :size="14" />
                 <span>Detail &amp; Verifikasi</span>
               </button>
-              <a
-                :href="`/api/certificates/${cert.id}/download`"
-                download
+              <button
+                type="button"
                 class="btn btn-primary btn-sm"
+                @click="downloadCertificate(cert)"
               >
                 <Download :size="14" />
                 <span>Unduh PNG</span>
-              </a>
+              </button>
             </div>
           </div>
         </div>
@@ -245,10 +267,14 @@ onMounted(() => {
           <!-- Image Preview -->
           <div class="modal-img-wrap">
             <img
-              :src="`/api/certificates/${selectedPreviewCert.id}/download`"
+              v-if="previewImageUrl"
+              :src="previewImageUrl"
               alt="Sertifikat Digital Asli"
               class="modal-cert-img"
             />
+            <div v-else class="preview-loading-spinner" style="padding: 40px; text-align: center; color: var(--text-muted);">
+              Memuat pratinjau sertifikat...
+            </div>
           </div>
 
           <!-- Metadata Grid -->
@@ -317,14 +343,14 @@ onMounted(() => {
 
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="closePreview">Tutup</button>
-          <a
-            :href="`/api/certificates/${selectedPreviewCert.id}/download`"
-            download
+          <button
+            type="button"
             class="btn btn-primary"
+            @click="downloadCertificate(selectedPreviewCert)"
           >
             <Download :size="16" />
             <span>Unduh Berkas PNG Lossless</span>
-          </a>
+          </button>
         </div>
       </div>
     </div>

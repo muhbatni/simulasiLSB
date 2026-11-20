@@ -1,5 +1,5 @@
 <script setup>
-import { ShieldCheck, Heart } from '@lucide/vue'
+import { ShieldCheck, Heart } from 'lucide-vue-next'
 </script>
 
 <template>

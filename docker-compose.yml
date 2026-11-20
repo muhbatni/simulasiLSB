@@ -1,13 +1,18 @@
 services:
-  # 1. PostgreSQL Database Tier (Proposal 3.1.4.2 D)
+  # 1. PostgreSQL Database Tier 17
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: lsb_postgres
     restart: always
     environment:
-      POSTGRES_USER: lsb_user
-      POSTGRES_PASSWORD: lsb_password_2026
-      POSTGRES_DB: lsb_certificate_db
+      POSTGRES_USER: ${POSTGRES_USER:-lsb_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lsb_password_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-lsb_certificate_db}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lsb_user} -d ${POSTGRES_DB:-lsb_certificate_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     ports:
       - "5432:5432"
     volumes:
@@ -15,7 +20,7 @@ services:
     networks:
       - lsb_network
 
-  # 2. Application Backend Tier: NestJS Modular API (Proposal 3.1.4.2 & 3.1.4.3)
+  # 2. Application Backend Tier: NestJS Modular API
   backend:
     build:
       context: ./backend
@@ -23,20 +28,22 @@ services:
     container_name: lsb_backend
     restart: always
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       PORT: 5000
-      DATABASE_URL: "postgresql://lsb_user:lsb_password_2026@postgres:5432/lsb_certificate_db?schema=public"
-      JWT_SECRET: "simulasi-lsb-uin-secret-key-2026"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://lsb_user:lsb_password_2026@postgres:5432/lsb_certificate_db?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-simulasi-lsb-uin-secret-key-2026}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      FRONTEND_URL: "http://localhost,http://localhost:80,http://frontend:80"
     ports:
       - "5000:5000"
     volumes:
       - backend_uploads:/app/uploads
-      - backend_data:/app/data
     networks:
       - lsb_network
 
-  # 3. Client Frontend Tier: Vue.js 3 + Nginx (Proposal 3.1.4.2 & 3.1.4.3)
+  # 3. Client Frontend Tier: Vue.js 3 + Nginx
   frontend:
     build:
       context: ./frontend
@@ -53,7 +60,6 @@ services:
 volumes:
   postgres_data:
   backend_uploads:
-  backend_data:
 
 networks:
   lsb_network:

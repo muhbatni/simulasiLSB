@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { ShieldCheck, UserCheck, Terminal, Award, LogIn, LogOut, CheckCircle2, Lock } from '@lucide/vue'
+import { ShieldCheck, UserCheck, Terminal, Award, LogIn, LogOut, CheckCircle2, Lock } from 'lucide-vue-next'
 
 const props = defineProps({
   activeTab: { type: String, default: 'verify' },

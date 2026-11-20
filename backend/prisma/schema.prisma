@@ -1,4 +1,4 @@
-// Prisma Schema sesuai Perancangan Skema Basis Data Relasional (Bab 3.1.4.2 D)
+// Prisma Schema Basis Data Relasional E-Sertifikat LSB & SHA-256
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -38,6 +38,7 @@ model Event {
   eventDate         String   @map("event_date")
   organizer         String
   templateImagePath String?  @map("template_image_path")
+  isActive          Boolean  @default(true) @map("is_active")
   createdBy         String   @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
 
@@ -48,21 +49,27 @@ model Event {
 }
 
 model Certificate {
-  id                  String   @id @default(uuid())
-  eventId             String   @map("event_id")
-  certificateNumber   String   @unique @map("certificate_number")
-  recipientName       String   @map("recipient_name")
-  recipientIdentifier String   @map("recipient_identifier") // NIM atau Email
-  recipientRole       String   @default("Peserta") @map("recipient_role")
-  sha256Hash          String   @map("sha256_hash")
-  stegoImagePath      String   @map("stego_image_path")
-  mse                 Float    @default(0)
-  psnr                Float    @default(0)
-  issuedAt            DateTime @default(now()) @map("issued_at")
+  id                  String    @id @default(uuid())
+  eventId             String    @map("event_id")
+  certificateNumber   String    @unique @map("certificate_number")
+  recipientName       String    @map("recipient_name")
+  recipientIdentifier String    @map("recipient_identifier") // NIM atau Email
+  recipientRole       String    @default("Peserta") @map("recipient_role")
+  sha256Hash          String    @default("") @map("sha256_hash")
+  canvasHash          String?   @map("canvas_hash")
+  stegoImagePath      String?   @map("stego_image_path")
+  coverImagePath      String?   @map("cover_image_path")
+  status              String    @default("BELUM_TERBIT") @map("status") // BELUM_TERBIT / TERBIT / DICABUT
+  mse                 Float     @default(0)
+  psnr                Float     @default(0)
+  tGenMs              Float?    @map("t_gen_ms")
+  issuedAt            DateTime? @map("issued_at")
 
-  event            Event             @relation(fields: [eventId], references: [id])
+  event            Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   verificationLogs VerificationLog[]
 
+  @@index([recipientIdentifier])
+  @@index([eventId])
   @@map("certificates")
 }
 
@@ -75,8 +82,14 @@ model VerificationLog {
   verificationStatus VerificationStatus @map("verification_status")
   verifiedAt         DateTime           @default(now()) @map("verified_at")
   message            String
+  tVerifMs           Float?             @map("t_verif_ms")
+  detail             String?            @map("detail")
+  storedHash         String?            @map("stored_hash")
+  recomputedHash     String?            @map("recomputed_hash")
 
-  certificate Certificate? @relation(fields: [certificateId], references: [id])
+  certificate Certificate? @relation(fields: [certificateId], references: [id], onDelete: SetNull)
 
+  @@index([verifiedAt])
+  @@index([certificateNumber])
   @@map("verification_logs")
 }

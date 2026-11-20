@@ -3,14 +3,9 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { DatabaseService, EventEntity, CertificateEntity } from '../database/database.service';
-
-export interface CreateRecipientDto {
-  certificateNumber?: string;
-  recipientName: string;
-  recipientIdentifier: string;
-  recipientRole?: string;
-}
+import { PrismaService } from '../database/prisma.service';
+import { Event, Certificate } from '@prisma/client';
+import { CreateEventDto, UpdateEventDto, CreateRecipientDto } from './dto/event.dto';
 
 export interface CsvImportRow {
   rowNumber: number;
@@ -24,169 +19,164 @@ export interface CsvImportRow {
 
 @Injectable()
 export class EventsService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  getAllEvents(): EventEntity[] {
-    return this.db.events.map((evt) => {
-      const count = this.db.certificates.filter(
-        (c) => c.eventId === evt.id && c.status === 'TERBIT',
-      ).length;
-      return { ...evt, totalCertificates: count };
+  async getAllEvents(onlyActive = false): Promise<any[]> {
+    const events = await this.prisma.event.findMany({
+      where: onlyActive ? { isActive: true } : undefined,
+      include: {
+        _count: {
+          select: {
+            certificates: {
+              where: { status: 'TERBIT' },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return events.map((evt) => ({
+      ...evt,
+      totalCertificates: evt._count.certificates,
+    }));
+  }
+
+  async getEventById(id: string): Promise<any> {
+    const evt = await this.prisma.event.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            certificates: {
+              where: { status: 'TERBIT' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!evt) {
+      throw new NotFoundException(`Event dengan ID ${id} tidak ditemukan`);
+    }
+
+    return {
+      ...evt,
+      totalCertificates: evt._count.certificates,
+    };
+  }
+
+  async createEvent(
+    data: CreateEventDto & { templateImagePath?: string; createdBy: string },
+  ): Promise<Event> {
+    return this.prisma.event.create({
+      data: {
+        eventName: data.eventName.trim(),
+        eventDate: data.eventDate.trim(),
+        organizer: data.organizer.trim(),
+        templateImagePath: data.templateImagePath,
+        isActive: true,
+        createdBy: data.createdBy,
+      },
     });
   }
 
-  getEventById(id: string): EventEntity {
-    const evt = this.db.events.find((e) => e.id === id);
-    if (!evt) throw new NotFoundException(`Event dengan ID ${id} tidak ditemukan`);
-    const count = this.db.certificates.filter(
-      (c) => c.eventId === evt.id && c.status === 'TERBIT',
-    ).length;
-    return { ...evt, totalCertificates: count };
+  async updateEvent(id: string, data: UpdateEventDto): Promise<Event> {
+    await this.getEventById(id);
+
+    return this.prisma.event.update({
+      where: { id },
+      data: {
+        ...(data.eventName !== undefined && { eventName: data.eventName.trim() }),
+        ...(data.eventDate !== undefined && { eventDate: data.eventDate.trim() }),
+        ...(data.organizer !== undefined && { organizer: data.organizer.trim() }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
+      },
+    });
   }
 
-  createEvent(data: {
-    eventName: string;
-    eventDate: string;
-    organizer: string;
-    templateImagePath?: string;
-    createdBy: string;
-  }): EventEntity {
-    if (!data.eventName || !data.eventDate || !data.organizer) {
-      throw new BadRequestException('Nama event, tanggal pelaksanaan, dan penyelenggara wajib diisi');
-    }
+  async deleteEvent(id: string): Promise<boolean> {
+    await this.getEventById(id);
 
-    const newEvent: EventEntity = {
-      id: `evt-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      eventName: data.eventName.trim(),
-      eventDate: data.eventDate.trim(),
-      organizer: data.organizer.trim(),
-      templateImagePath: data.templateImagePath,
-      isActive: true,
-      createdBy: data.createdBy,
-      createdAt: new Date().toISOString(),
-    };
+    // Event yang sudah memiliki sertifikat terbit tidak boleh dihapus, hanya dinonaktifkan
+    const issuedCount = await this.prisma.certificate.count({
+      where: { eventId: id, status: 'TERBIT' },
+    });
 
-    this.db.events.unshift(newEvent);
-    this.db.saveData();
-    return newEvent;
-  }
-
-  updateEvent(
-    id: string,
-    data: {
-      eventName?: string;
-      eventDate?: string;
-      organizer?: string;
-      isActive?: boolean;
-    },
-  ): EventEntity {
-    const evt = this.db.events.find((e) => e.id === id);
-    if (!evt) throw new NotFoundException(`Event dengan ID ${id} tidak ditemukan`);
-
-    if (data.eventName !== undefined) evt.eventName = data.eventName.trim();
-    if (data.eventDate !== undefined) evt.eventDate = data.eventDate.trim();
-    if (data.organizer !== undefined) evt.organizer = data.organizer.trim();
-    if (data.isActive !== undefined) evt.isActive = data.isActive;
-
-    this.db.saveData();
-    return evt;
-  }
-
-  deleteEvent(id: string): boolean {
-    const idx = this.db.events.findIndex((e) => e.id === id);
-    if (idx === -1) throw new NotFoundException(`Event dengan ID ${id} tidak ditemukan`);
-
-    // F-03: Event yang sudah memiliki sertifikat terbit tidak boleh dihapus, hanya dinonaktifkan
-    const issuedCerts = this.db.certificates.filter(
-      (c) => c.eventId === id && c.status === 'TERBIT',
-    );
-    if (issuedCerts.length > 0) {
+    if (issuedCount > 0) {
       throw new BadRequestException(
-        `Event yang sudah memiliki sertifikat terbit (${issuedCerts.length} berkas) tidak dapat dihapus, hanya dapat dinonaktifkan.`,
+        `Event yang sudah memiliki sertifikat terbit (${issuedCount} berkas) tidak dapat dihapus, hanya dapat dinonaktifkan.`,
       );
     }
 
-    // Hapus juga calon penerima yang belum terbit
-    this.db.certificates = this.db.certificates.filter((c) => c.eventId !== id);
-    this.db.events.splice(idx, 1);
-    this.db.saveData();
+    // Hapus calon penerima belum terbit dan event
+    await this.prisma.certificate.deleteMany({
+      where: { eventId: id, status: 'BELUM_TERBIT' },
+    });
+
+    await this.prisma.event.delete({
+      where: { id },
+    });
+
     return true;
   }
 
-  // F-04: Kelola Penerima Event
-  getEventRecipients(eventId: string): CertificateEntity[] {
-    const evt = this.db.events.find((e) => e.id === eventId);
-    if (!evt) throw new NotFoundException(`Event dengan ID ${eventId} tidak ditemukan`);
-    return this.db.certificates.filter((c) => c.eventId === eventId);
+  async getEventRecipients(eventId: string): Promise<Certificate[]> {
+    await this.getEventById(eventId);
+    return this.prisma.certificate.findMany({
+      where: { eventId },
+      orderBy: { recipientName: 'asc' },
+    });
   }
 
-  addRecipient(eventId: string, dto: CreateRecipientDto): CertificateEntity {
-    const evt = this.db.events.find((e) => e.id === eventId);
-    if (!evt) throw new NotFoundException(`Event dengan ID ${eventId} tidak ditemukan`);
+  async addRecipient(eventId: string, dto: CreateRecipientDto): Promise<Certificate> {
+    await this.getEventById(eventId);
 
-    const name = dto.recipientName ? dto.recipientName.trim() : '';
-    const identifier = dto.recipientIdentifier ? dto.recipientIdentifier.trim() : '';
-    const role = dto.recipientRole ? dto.recipientRole.trim() : 'Peserta';
-
-    if (!name || !identifier) {
-      throw new BadRequestException('Nama penerima dan NIM/Identifikasi wajib diisi');
-    }
-
-    if (name.length > 100) {
-      throw new BadRequestException('Nama penerima maksimal 100 karakter');
-    }
-    if (role.length > 30) {
-      throw new BadRequestException('Peran penerima maksimal 30 karakter');
-    }
-
+    const name = dto.recipientName.trim();
+    const identifier = dto.recipientIdentifier.trim();
+    const role = dto.recipientRole?.trim() || 'Peserta';
     const certNum =
       dto.certificateNumber?.trim() ||
       `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // Cek keunikan nomor sertifikat
-    const existing = this.db.certificates.find(
-      (c) => c.certificateNumber.toLowerCase() === certNum.toLowerCase(),
-    );
+    const existing = await this.prisma.certificate.findUnique({
+      where: { certificateNumber: certNum },
+    });
     if (existing) {
       throw new BadRequestException(`Nomor sertifikat '${certNum}' sudah digunakan`);
     }
 
-    const newRecipient: CertificateEntity = {
-      id: `rec-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      eventId,
-      certificateNumber: certNum,
-      recipientName: name,
-      recipientIdentifier: identifier,
-      recipientRole: role,
-      sha256Hash: '',
-      status: 'BELUM_TERBIT',
-      mse: 0,
-      psnr: 0,
-      eventName: evt.eventName,
-      organizer: evt.organizer,
-    };
-
-    this.db.certificates.push(newRecipient);
-    this.db.saveData();
-    return newRecipient;
+    return this.prisma.certificate.create({
+      data: {
+        eventId,
+        certificateNumber: certNum,
+        recipientName: name,
+        recipientIdentifier: identifier,
+        recipientRole: role,
+        sha256Hash: '',
+        status: 'BELUM_TERBIT',
+        mse: 0,
+        psnr: 0,
+      },
+    });
   }
 
-  // F-05: Impor Massal CSV Penerima
-  processCsvImport(
+  async processCsvImport(
     eventId: string,
     csvContent: string,
     executeImport = false,
-  ): {
+  ): Promise<{
     totalRows: number;
     validCount: number;
     invalidCount: number;
     rows: CsvImportRow[];
-    importedItems?: CertificateEntity[];
-  } {
-    const evt = this.db.events.find((e) => e.id === eventId);
-    if (!evt) throw new NotFoundException(`Event dengan ID ${eventId} tidak ditemukan`);
+    importedItems?: Certificate[];
+  }> {
+    await this.getEventById(eventId);
 
-    const lines = csvContent
+    // Bersihkan UTF-8 BOM jika ada
+    const cleanContent = csvContent.replace(/^\uFEFF/, '');
+    const lines = cleanContent
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
@@ -195,13 +185,29 @@ export class EventsService {
       throw new BadRequestException('Berkas CSV kosong');
     }
 
-    // Maksimum 500 baris per berkas (spec F-05)
     if (lines.length > 501) {
       throw new BadRequestException('Maksimum 500 baris per berkas CSV');
     }
 
-    // Periksa header
+    // Deteksi separator (koma atau titik koma)
     const firstLine = lines[0].toLowerCase();
+    const delimiter = firstLine.includes(';') ? ';' : ',';
+
+    const parseCsvLine = (line: string): string[] => {
+      // Regex parsing CSV yang mendukung kutip ganda
+      const pattern = new RegExp(
+        `(?:^|${delimiter})(?:"([^"]*(?:""[^"]*)*)"|([^"${delimiter}]*))`,
+        'g',
+      );
+      const matches: string[] = [];
+      let match;
+      while ((match = pattern.exec(line)) !== null) {
+        let val = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
+        matches.push((val || '').trim());
+      }
+      return matches;
+    };
+
     let hasHeader = false;
     let colCertNumIdx = -1;
     let colNameIdx = 0;
@@ -214,7 +220,7 @@ export class EventsService {
       firstLine.includes('nim')
     ) {
       hasHeader = true;
-      const headers = firstLine.split(',').map((h) => h.trim());
+      const headers = parseCsvLine(firstLine).map((h) => h.toLowerCase());
       colCertNumIdx = headers.indexOf('nomor_sertifikat');
       colNameIdx = headers.indexOf('nama');
       colIdIdx = headers.indexOf('nim_email');
@@ -229,14 +235,18 @@ export class EventsService {
 
     const dataLines = hasHeader ? lines.slice(1) : lines;
     const parsedRows: CsvImportRow[] = [];
+
+    const existingCerts = await this.prisma.certificate.findMany({
+      select: { certificateNumber: true },
+    });
     const usedCertNumbers = new Set(
-      this.db.certificates.map((c) => c.certificateNumber.toLowerCase()),
+      existingCerts.map((c) => c.certificateNumber.toLowerCase()),
     );
 
     let rowNum = hasHeader ? 2 : 1;
 
     for (const line of dataLines) {
-      const parts = line.split(',').map((p) => p.trim());
+      const parts = parseCsvLine(line);
       const name = colNameIdx !== -1 ? parts[colNameIdx] || '' : parts[0] || '';
       const identifier = colIdIdx !== -1 ? parts[colIdIdx] || '' : parts[1] || '';
       const role = colRoleIdx !== -1 ? parts[colRoleIdx] || 'Peserta' : parts[2] || 'Peserta';
@@ -251,16 +261,18 @@ export class EventsService {
       if (!name) {
         isValid = false;
         errorMessage = 'Nama penerima tidak boleh kosong';
+      } else if (!identifier) {
+        isValid = false;
+        errorMessage = 'NIM/Identitas tidak boleh kosong';
       } else if (name.length > 100) {
         isValid = false;
         errorMessage = 'Nama melebihi 100 karakter';
-      } else if (!identifier) {
-        isValid = false;
-        errorMessage = 'NIM/Identifier tidak boleh kosong';
       } else if (usedCertNumbers.has(certNum.toLowerCase())) {
         isValid = false;
-        errorMessage = `Nomor sertifikat '${certNum}' duplikat di basis data`;
-      } else {
+        errorMessage = `Nomor sertifikat '${certNum}' duplikat di sistem`;
+      }
+
+      if (isValid) {
         usedCertNumbers.add(certNum.toLowerCase());
       }
 
@@ -269,49 +281,45 @@ export class EventsService {
         certificateNumber: certNum,
         recipientName: name,
         recipientIdentifier: identifier,
-        recipientRole: role,
+        recipientRole: role || 'Peserta',
         isValid,
         errorMessage: errorMessage || undefined,
       });
     }
 
     const validRows = parsedRows.filter((r) => r.isValid);
-    const invalidRows = parsedRows.filter((r) => !r.isValid);
-
-    const importedItems: CertificateEntity[] = [];
+    let importedItems: Certificate[] | undefined = undefined;
 
     if (executeImport && validRows.length > 0) {
-      for (const row of validRows) {
-        const item: CertificateEntity = {
-          id: `rec-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-          eventId,
-          certificateNumber: row.certificateNumber,
-          recipientName: row.recipientName,
-          recipientIdentifier: row.recipientIdentifier,
-          recipientRole: row.recipientRole || 'Peserta',
-          sha256Hash: '',
-          status: 'BELUM_TERBIT',
-          mse: 0,
-          psnr: 0,
-          eventName: evt.eventName,
-          organizer: evt.organizer,
-        };
-        this.db.certificates.push(item);
-        importedItems.push(item);
-      }
-      this.db.saveData();
+      importedItems = await this.prisma.$transaction(
+        validRows.map((r) =>
+          this.prisma.certificate.create({
+            data: {
+              eventId,
+              certificateNumber: r.certificateNumber,
+              recipientName: r.recipientName,
+              recipientIdentifier: r.recipientIdentifier,
+              recipientRole: r.recipientRole,
+              sha256Hash: '',
+              status: 'BELUM_TERBIT',
+              mse: 0,
+              psnr: 0,
+            },
+          }),
+        ),
+      );
     }
 
     return {
       totalRows: parsedRows.length,
       validCount: validRows.length,
-      invalidCount: invalidRows.length,
+      invalidCount: parsedRows.length - validRows.length,
       rows: parsedRows,
-      importedItems: executeImport ? importedItems : undefined,
+      importedItems,
     };
   }
 
   getCsvTemplate(): string {
-    return 'nomor_sertifikat,nama,nim_email,peran\nUINSA/FST/2026/001,Ahmad Fulan,09020623041,Peserta\nUINSA/FST/2026/002,Siti Nurhaliza,09020623088,Pemateri\n';
+    return 'nomor_sertifikat,nama,nim_email,peran\nUINSA/FST/2026/001,Ahmad Fulan,09020623001,Peserta\nUINSA/FST/2026/002,Siti Nurhaliza,09020623002,Pemateri';
   }
 }

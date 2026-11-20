@@ -6,7 +6,6 @@ import {
   Delete,
   Param,
   Body,
-  Query,
   Res,
   UseGuards,
   Request,
@@ -16,11 +15,12 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { EventsService, CreateRecipientDto } from './events.service';
+import { EventsService } from './events.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { LsbSteganoService } from '../security/lsb-stego.service';
+import { CreateEventDto, UpdateEventDto, CreateRecipientDto } from './dto/event.dto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -31,11 +31,15 @@ export class EventsController {
     private readonly lsbService: LsbSteganoService,
   ) {}
 
+  @UseGuards(JwtAuthGuard)
   @Get()
-  getAll() {
-    return this.eventsService.getAllEvents();
+  getAll(@Request() req: any) {
+    const onlyActive = req.user?.role !== 'admin';
+    return this.eventsService.getAllEvents(onlyActive);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Get('recipients/template-csv')
   downloadCsvTemplate(@Res() res: Response) {
     const csv = this.eventsService.getCsvTemplate();
@@ -44,6 +48,7 @@ export class EventsController {
     res.send(csv);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
   getOne(@Param('id') id: string) {
     return this.eventsService.getEventById(id);
@@ -54,7 +59,7 @@ export class EventsController {
   @Post()
   @UseInterceptors(
     FileInterceptor('templateImage', {
-      limits: { fileSize: 10 * 1024 * 1024 }, // Maksimal 10 MB (Spec F-03)
+      limits: { fileSize: 10 * 1024 * 1024 }, // Maksimal 10 MB
       fileFilter: (req, file, cb) => {
         if (file) {
           const ext = path.extname(file.originalname).toLowerCase();
@@ -70,24 +75,21 @@ export class EventsController {
     }),
   )
   async create(
-    @Body()
-    body: {
-      eventName: string;
-      eventDate: string;
-      organizer: string;
-    },
+    @Body() body: CreateEventDto,
     @UploadedFile() file: Express.Multer.File,
     @Request() req: any,
   ) {
     let templateImagePath: string | undefined = undefined;
 
     if (file) {
-      // Validasi Magic Bytes PNG (89 50 4E 47 0D 0A 1A 0A) (Spec F-03)
+      // Validasi Magic Bytes PNG (89 50 4E 47 0D 0A 1A 0A)
       if (!this.lsbService.isPng(file.buffer)) {
         throw new BadRequestException('Berkas bukan berkas PNG valid (magic bytes mismatch)');
       }
 
-      const fileName = `template-${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      // Sanitasi nama berkas untuk mencegah path traversal
+      const safeBasename = path.basename(file.originalname).replace(/[^a-zA-Z0-9.-]/g, '_');
+      const fileName = `template-${Date.now()}-${safeBasename}`;
       const coversDir = path.join(process.cwd(), 'uploads', 'covers');
       if (!fs.existsSync(coversDir)) {
         fs.mkdirSync(coversDir, { recursive: true });
@@ -102,23 +104,14 @@ export class EventsController {
       eventDate: body.eventDate,
       organizer: body.organizer,
       templateImagePath,
-      createdBy: req.user?.username || 'admin',
+      createdBy: req.user?.sub || 'admin',
     });
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Patch(':id')
-  update(
-    @Param('id') id: string,
-    @Body()
-    body: {
-      eventName?: string;
-      eventDate?: string;
-      organizer?: string;
-      isActive?: boolean;
-    },
-  ) {
+  update(@Param('id') id: string, @Body() body: UpdateEventDto) {
     return this.eventsService.updateEvent(id, body);
   }
 
@@ -126,10 +119,9 @@ export class EventsController {
   @Roles('admin')
   @Delete(':id')
   delete(@Param('id') id: string) {
-    return { success: this.eventsService.deleteEvent(id) };
+    return this.eventsService.deleteEvent(id);
   }
 
-  // F-04: Penerima Event
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Get(':id/recipients')
@@ -144,11 +136,14 @@ export class EventsController {
     return this.eventsService.addRecipient(id, body);
   }
 
-  // F-05: Impor Massal CSV
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Post(':id/recipients/import')
-  @UseInterceptors(FileInterceptor('csvFile'))
+  @UseInterceptors(
+    FileInterceptor('csvFile', {
+      limits: { fileSize: 5 * 1024 * 1024 }, // Maksimal 5 MB
+    }),
+  )
   importRecipients(
     @Param('id') id: string,
     @Body() body: { csvText?: string; preview?: string | boolean },

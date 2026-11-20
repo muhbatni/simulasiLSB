@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import api from '../services/api'
 import {
   Terminal,
   Play,
@@ -16,7 +16,7 @@ import {
   FileCheck2,
   HelpCircle,
   Download
-} from '@lucide/vue'
+} from 'lucide-vue-next'
 
 const activeLabTab = ref('blackbox') // 'blackbox' | 'sampling' | 'imperceptibility' | 'tamper'
 
@@ -42,7 +42,7 @@ const isComputingAvalanche = ref(false)
 const runBlackBoxTest = async () => {
   isRunningBlackBox.value = true
   try {
-    const res = await axios.get('/api/simulation/black-box')
+    const res = await api.get('/simulation/black-box')
     blackBoxData.value = res.data
   } catch (err) {
     console.error('Blackbox run error:', err)
@@ -55,7 +55,7 @@ const runSamplingTest = async (count = 50) => {
   isRunningSampling.value = true
   samplingProgress.value = 10
   try {
-    const res = await axios.get(`/api/simulation/iterative-test?count=${count}`)
+    const res = await api.get(`/simulation/iterative-test?count=${count}`)
     samplingData.value = res.data
     samplingProgress.value = 100
   } catch (err) {
@@ -68,7 +68,7 @@ const runSamplingTest = async (count = 50) => {
 const runTamperTest = async () => {
   isRunningTamper.value = true
   try {
-    const res = await axios.get('/api/simulation/tamper-test')
+    const res = await api.get('/simulation/tamper-test')
     tamperData.value = res.data
   } catch (err) {
     console.error('Tamper test error:', err)
@@ -82,9 +82,7 @@ const isExportingMetrics = ref(false)
 const handleExportMetricsCsv = async (count = 50) => {
   isExportingMetrics.value = true
   try {
-    const token = localStorage.getItem('lsb_token')
-    const res = await axios.get(`/api/metrics/export?count=${count}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    const res = await api.get(`/metrics/export?count=${count}`, {
       responseType: 'blob',
     })
     const blob = new Blob([res.data], { type: 'text/csv' })
@@ -103,7 +101,7 @@ const handleExportMetricsCsv = async (count = 50) => {
 const calculateAvalanche = async () => {
   isComputingAvalanche.value = true
   try {
-    const res = await axios.post('/api/simulation/avalanche', {
+    const res = await api.post('/simulation/avalanche', {
       textA: sandboxTextA.value,
       textB: sandboxTextB.value,
     })
@@ -130,7 +128,7 @@ onMounted(() => {
           <Terminal :size="14" />
           <span>EVALUASI EMPIRIS &amp; LABORATORIUM PENGUJIAN</span>
         </div>
-        <h2 class="lab-title">Laboratorium Pengujian Sistem (BAB 3.1.4.4)</h2>
+        <h2 class="lab-title">Laboratorium Pengujian Sistem</h2>
         <p class="lab-desc">
           Suite pengujian deterministik yang mengevaluasi fungsionalitas black-box, reliabilitas iterasi 50 berkas e-sertifikat riil,
           mutu citra stego (MSE &amp; PSNR), serta efek longsor (avalanche effect) SHA-256.
@@ -176,12 +174,12 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- TAB 1: Black-Box Testing (Tabel 3.1) -->
+      <!-- TAB 1: Black-Box Testing -->
       <div v-if="activeLabTab === 'blackbox'" class="tab-content">
         <div class="glass-card lab-card">
           <div class="card-action-bar">
             <div>
-              <h3 class="card-heading">Tabel 3.1 Skenario Pengujian Black-Box Sistem</h3>
+              <h3 class="card-heading">Skenario Pengujian Black-Box Sistem</h3>
               <p class="card-caption">Equivalence Partitioning &amp; Boundary Value Analysis pada seluruh alur transaksi.</p>
             </div>
             <button class="btn btn-primary btn-sm" :disabled="isRunningBlackBox" @click="runBlackBoxTest">
@@ -241,12 +239,12 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- TAB 2: Iterative Reliability Sampling 50 (Tabel 3.2) -->
+      <!-- TAB 2: Iterative Reliability Sampling 50 -->
       <div v-if="activeLabTab === 'sampling'" class="tab-content">
         <div class="glass-card lab-card">
           <div class="card-action-bar">
             <div>
-              <h3 class="card-heading">Tabel 3.2 Uji Iterasi Sampling Reliabilitas (50 E-Sertifikat)</h3>
+              <h3 class="card-heading">Uji Iterasi Sampling Reliabilitas (50 E-Sertifikat)</h3>
               <p class="card-caption">
                 Batch 1: 25 sampel Full HD (1920 &times; 1080 px) &bull; Batch 2: 25 sampel A4 Landscape 300 DPI (2480 &times; 1754 px)
               </p>
@@ -335,7 +333,7 @@ onMounted(() => {
             </table>
           </div>
 
-          <!-- Root Cause Failure Analysis Box (Proposal Chapter 3.1.4.4) -->
+          <!-- Root Cause Failure Analysis Box -->
           <div class="root-cause-box">
             <h4 class="rc-title">
               <HelpCircle :size="16" class="text-gold" />
@@ -367,10 +365,10 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- TAB 3: Quality Evaluation (MSE & PSNR - Tabel 3.3) -->
+      <!-- TAB 3: Quality Evaluation (MSE & PSNR) -->
       <div v-if="activeLabTab === 'imperceptibility'" class="tab-content">
         <div class="glass-card lab-card">
-          <h3 class="card-heading">Tabel 3.3 Parameter dan Kriteria Pengujian Kualitas Citra Stego</h3>
+          <h3 class="card-heading">Parameter dan Kriteria Pengujian Kualitas Citra Stego</h3>
           <p class="card-caption">Evaluasi tingkat imperseptibilitas matematis menggunakan Mean Squared Error (MSE) dan Peak Signal-to-Noise Ratio (PSNR).</p>
 
           <!-- Mathematical Formula Cards -->
@@ -400,7 +398,7 @@ onMounted(() => {
                   <th>Parameter Uji</th>
                   <th>Rentang Acuan Nilai</th>
                   <th>Interpretasi Kualitas Citra</th>
-                  <th>Kriteria Keberhasilan Proposal</th>
+                  <th>Kriteria Keberhasilan</th>
                   <th>Capaian Sistem Nyata</th>
                 </tr>
               </thead>
@@ -432,12 +430,12 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- TAB 4: Tamper Detection & Avalanche Effect (Tabel 3.4) -->
+      <!-- TAB 4: Tamper Detection & Avalanche Effect -->
       <div v-if="activeLabTab === 'tamper'" class="tab-content">
         <div class="glass-card lab-card">
           <div class="card-action-bar">
             <div>
-              <h3 class="card-heading">Tabel 3.4 Skenario Pengujian Integritas Data &amp; Deteksi Modifikasi</h3>
+              <h3 class="card-heading">Skenario Pengujian Integritas Data &amp; Deteksi Modifikasi</h3>
               <p class="card-caption">Pengujian sifat efek longsor (avalanche effect) SHA-256 terhadap perubahan 1 bit.</p>
             </div>
             <button class="btn btn-primary btn-sm" :disabled="isRunningTamper" @click="runTamperTest">
@@ -447,7 +445,7 @@ onMounted(() => {
             </button>
           </div>
 
-          <!-- 5 Scenarios Table from Proposal Table 3.4 -->
+          <!-- 5 Scenarios Table -->
           <div v-if="tamperData" class="table-scroll-wrap">
             <table class="lab-table">
               <thead>

@@ -8,120 +8,120 @@ import * as fs from 'fs';
 import * as path from 'path';
 const archiver = require('archiver');
 import { Response } from 'express';
-import { DatabaseService, CertificateEntity } from '../database/database.service';
-import { LsbSteganoService, CertificateMetadata, VerificationResult } from '../security/lsb-stego.service';
+import { PrismaService } from '../database/prisma.service';
+import { Certificate, Event } from '@prisma/client';
+import {
+  LsbSteganoService,
+  CertificateMetadata,
+  VerificationResult,
+} from '../security/lsb-stego.service';
 import { CertificateGeneratorService } from './certificate-generator.service';
-
-export interface GenerateCertDto {
-  eventId: string;
-  recipientName: string;
-  recipientIdentifier: string;
-  recipientRole?: string;
-  certificateNumber?: string;
-  resolution?: '1080p' | '300dpi';
-}
+import { GenerateCertDto } from './dto/certificate.dto';
 
 @Injectable()
 export class CertificatesService {
   constructor(
-    private readonly db: DatabaseService,
+    private readonly prisma: PrismaService,
     private readonly lsbService: LsbSteganoService,
     private readonly certGenerator: CertificateGeneratorService,
   ) {}
 
-  getAllCertificates(): CertificateEntity[] {
-    return this.db.certificates
-      .filter((c) => c.status === 'TERBIT')
-      .map((cert) => {
-        const evt = this.db.events.find((e) => e.id === cert.eventId);
-        return {
-          ...cert,
-          eventName: evt?.eventName || cert.eventName || 'Kegiatan Akademik',
-          organizer: evt?.organizer || cert.organizer || 'FST UINSA',
-        };
-      });
+  async getAllCertificates(): Promise<any[]> {
+    const certs = await this.prisma.certificate.findMany({
+      where: { status: 'TERBIT' },
+      include: { event: true },
+      orderBy: { issuedAt: 'desc' },
+    });
+
+    return certs.map((c) => ({
+      ...c,
+      eventName: c.event?.eventName || 'Kegiatan Akademik',
+      organizer: c.event?.organizer || 'FST UINSA',
+    }));
   }
 
-  getCertificateById(id: string): CertificateEntity {
-    const cert = this.db.certificates.find((c) => c.id === id);
-    if (!cert) throw new NotFoundException(`Sertifikat dengan ID ${id} tidak ditemukan`);
-    const evt = this.db.events.find((e) => e.id === cert.eventId);
+  async getCertificateById(id: string): Promise<any> {
+    const cert = await this.prisma.certificate.findUnique({
+      where: { id },
+      include: { event: true },
+    });
+    if (!cert) {
+      throw new NotFoundException(`Sertifikat dengan ID ${id} tidak ditemukan`);
+    }
+
     return {
       ...cert,
-      eventName: evt?.eventName || cert.eventName || 'Kegiatan Akademik',
-      organizer: evt?.organizer || cert.organizer || 'FST UINSA',
+      eventName: cert.event?.eventName || 'Kegiatan Akademik',
+      organizer: cert.event?.organizer || 'FST UINSA',
     };
   }
 
-  searchCertificates(query: string): CertificateEntity[] {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return this.db.certificates
-      .filter(
-        (c) =>
-          c.status === 'TERBIT' &&
-          (c.certificateNumber.toLowerCase().includes(q) ||
-            c.recipientIdentifier.toLowerCase().includes(q) ||
-            c.recipientName.toLowerCase().includes(q)),
-      )
-      .map((cert) => {
-        const evt = this.db.events.find((e) => e.id === cert.eventId);
-        return {
-          ...cert,
-          eventName: evt?.eventName || cert.eventName || 'Kegiatan Akademik',
-          organizer: evt?.organizer || cert.organizer || 'FST UINSA',
-        };
-      });
+  async searchCertificates(query: string, studentFilter?: string): Promise<any[]> {
+    const q = query.trim();
+    const whereClause: any = {
+      status: 'TERBIT',
+    };
+
+    if (studentFilter) {
+      whereClause.recipientIdentifier = {
+        equals: studentFilter.trim(),
+        mode: 'insensitive',
+      };
+    }
+
+    if (q) {
+      whereClause.OR = [
+        { certificateNumber: { contains: q, mode: 'insensitive' } },
+        { recipientName: { contains: q, mode: 'insensitive' } },
+        { recipientIdentifier: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const certs = await this.prisma.certificate.findMany({
+      where: whereClause,
+      include: { event: true },
+      orderBy: { issuedAt: 'desc' },
+    });
+
+    return certs.map((c) => ({
+      ...c,
+      eventName: c.event?.eventName || 'Kegiatan Akademik',
+      organizer: c.event?.organizer || 'FST UINSA',
+    }));
   }
 
-  // F-08: Portal Mahasiswa - Hanya sertifikat milik sendiri berdasarkan NIM
-  getStudentCertificates(studentNim: string, query?: string): CertificateEntity[] {
-    const nimLower = studentNim.trim().toLowerCase();
-    const q = query ? query.trim().toLowerCase() : '';
-
-    return this.db.certificates
-      .filter((c) => {
-        const isOwner = c.recipientIdentifier.toLowerCase() === nimLower;
-        if (!isOwner) return false;
-        if (c.status !== 'TERBIT') return false;
-        if (q) {
-          return (
-            c.certificateNumber.toLowerCase().includes(q) ||
-            c.recipientName.toLowerCase().includes(q) ||
-            (c.eventName && c.eventName.toLowerCase().includes(q))
-          );
-        }
-        return true;
-      })
-      .map((cert) => {
-        const evt = this.db.events.find((e) => e.id === cert.eventId);
-        return {
-          ...cert,
-          eventName: evt?.eventName || cert.eventName || 'Kegiatan Akademik',
-          organizer: evt?.organizer || cert.organizer || 'FST UINSA',
-        };
-      });
+  // Portal Mahasiswa - Hanya sertifikat milik sendiri berdasarkan NIM
+  async getStudentCertificates(studentNim: string, query?: string): Promise<any[]> {
+    return this.searchCertificates(query || '', studentNim);
   }
 
-  // F-08: Verifikasi berkas tersimpan mahasiswa
+  // Verifikasi berkas tersimpan mahasiswa
   async verifyStudentCertificate(
     certId: string,
     studentNim: string,
     isAdmin = false,
   ): Promise<VerificationResult> {
-    const cert = this.db.certificates.find((c) => c.id === certId);
-    if (!cert) throw new NotFoundException('Sertifikat tidak ditemukan');
+    const cert = await this.prisma.certificate.findUnique({
+      where: { id: certId },
+    });
+    if (!cert) {
+      throw new NotFoundException('Sertifikat tidak ditemukan');
+    }
 
     if (!isAdmin && cert.recipientIdentifier.toLowerCase() !== studentNim.toLowerCase()) {
       throw new ForbiddenException('Akses ditolak: sertifikat bukan milik akun Anda');
     }
 
     const filePath = this.getStegoFilePath(certId);
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Berkas stego sertifikat tidak ditemukan di penyimpanan server');
+    }
+
     const buffer = fs.readFileSync(filePath);
     return this.lsbService.extractAndVerify(buffer);
   }
 
-  // F-06: Penerbitan Sertifikat Resmi (Penerbitan Satu atau Banyak dari Daftar Penerima)
+  // Penerbitan Sertifikat Resmi dari Daftar Penerima
   async issueCertificates(
     eventId: string,
     recipientIds?: string[],
@@ -130,28 +130,38 @@ export class CertificatesService {
     totalProcessed: number;
     successCount: number;
     failedCount: number;
-    results: Array<{ certificate: CertificateEntity; stats?: any; error?: string }>;
+    results: Array<{ certificate: Certificate; stats?: any; error?: string }>;
   }> {
-    const event = this.db.events.find((e) => e.id === eventId);
-    if (!event) throw new NotFoundException(`Event dengan ID ${eventId} tidak ditemukan`);
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+    });
+    if (!event) {
+      throw new NotFoundException(`Event dengan ID ${eventId} tidak ditemukan`);
+    }
 
-    let targetRecipients: CertificateEntity[] = [];
+    let targetRecipients: Certificate[] = [];
     if (recipientIds && recipientIds.length > 0) {
-      targetRecipients = this.db.certificates.filter(
-        (c) => c.eventId === eventId && recipientIds.includes(c.id),
-      );
+      targetRecipients = await this.prisma.certificate.findMany({
+        where: {
+          eventId,
+          id: { in: recipientIds },
+        },
+      });
     } else {
       // Ambil seluruh calon penerima yang berstatus BELUM_TERBIT
-      targetRecipients = this.db.certificates.filter(
-        (c) => c.eventId === eventId && c.status === 'BELUM_TERBIT',
-      );
+      targetRecipients = await this.prisma.certificate.findMany({
+        where: {
+          eventId,
+          status: 'BELUM_TERBIT',
+        },
+      });
     }
 
     if (targetRecipients.length === 0) {
       throw new BadRequestException('Tidak ada calon penerima yang ditemukan untuk diterbitkan');
     }
 
-    const results: Array<{ certificate: CertificateEntity; stats?: any; error?: string }> = [];
+    const results: Array<{ certificate: Certificate; stats?: any; error?: string }> = [];
     let successCount = 0;
     let failedCount = 0;
 
@@ -167,7 +177,6 @@ export class CertificatesService {
       }
     }
 
-    this.db.saveData();
     return {
       totalProcessed: targetRecipients.length,
       successCount,
@@ -179,45 +188,54 @@ export class CertificatesService {
   async generateCertificate(
     dto: GenerateCertDto,
     customCoverBuffer?: Buffer,
-  ): Promise<{ certificate: CertificateEntity; embedStats: any }> {
-    const event = this.db.events.find((e) => e.id === dto.eventId);
-    if (!event) throw new NotFoundException(`Event dengan ID ${dto.eventId} tidak ditemukan`);
+  ): Promise<{ certificate: Certificate; embedStats: any }> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: dto.eventId },
+    });
+    if (!event) {
+      throw new NotFoundException(`Event dengan ID ${dto.eventId} tidak ditemukan`);
+    }
 
-    const certId = `cert-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const certNumber =
       dto.certificateNumber ||
       `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
     const role = dto.recipientRole || 'Peserta';
 
-    const tempRecipient: CertificateEntity = {
-      id: certId,
-      eventId: event.id,
-      certificateNumber: certNumber,
-      recipientName: dto.recipientName,
-      recipientIdentifier: dto.recipientIdentifier,
-      recipientRole: role,
-      sha256Hash: '',
-      status: 'BELUM_TERBIT',
-      mse: 0,
-      psnr: 0,
-    };
+    // Cek apakah sudah ada record dengan nomor sertifikat ini
+    let recipient = await this.prisma.certificate.findUnique({
+      where: { certificateNumber: certNumber },
+    });
+
+    if (!recipient) {
+      recipient = await this.prisma.certificate.create({
+        data: {
+          eventId: event.id,
+          certificateNumber: certNumber,
+          recipientName: dto.recipientName,
+          recipientIdentifier: dto.recipientIdentifier,
+          recipientRole: role,
+          sha256Hash: '',
+          status: 'BELUM_TERBIT',
+          mse: 0,
+          psnr: 0,
+        },
+      });
+    }
 
     return this.generateCertificateForRecipient(
       event,
-      tempRecipient,
+      recipient,
       dto.resolution || '1080p',
       customCoverBuffer,
-      true,
     );
   }
 
   private async generateCertificateForRecipient(
-    event: any,
-    recipient: CertificateEntity,
+    event: Event,
+    recipient: Certificate,
     resolution: '1080p' | '300dpi' = '1080p',
     customCoverBuffer?: Buffer,
-    isNewRecord = false,
-  ): Promise<{ certificate: CertificateEntity; embedStats: any }> {
+  ): Promise<{ certificate: Certificate; embedStats: any }> {
     const width = resolution === '300dpi' ? 2480 : 1920;
     const height = resolution === '300dpi' ? 1754 : 1080;
 
@@ -234,7 +252,6 @@ export class CertificatesService {
 
     // Siapkan Citra Cover
     let coverBuffer: Buffer;
-
     if (customCoverBuffer) {
       coverBuffer = await this.certGenerator.overlayTextOnTemplate(customCoverBuffer, designParams);
     } else if (event.templateImagePath) {
@@ -249,7 +266,7 @@ export class CertificatesService {
       coverBuffer = await this.certGenerator.generateCertificateImage(designParams);
     }
 
-    // Persiapkan Metadata untuk Algoritma 3.1
+    // Embedding LSB dan Pembangkitan Hash SHA-256 + Canvas Hash
     const metadata: CertificateMetadata = {
       nomor: recipient.certificateNumber,
       nama: recipient.recipientName,
@@ -259,46 +276,54 @@ export class CertificatesService {
       lembaga: event.organizer,
     };
 
-    // Eksekusi Algoritma 3.1: SHA-256 + LSB Embedding
-    const embedResult = await this.lsbService.embedPayload(coverBuffer, metadata);
+    const embedRes = await this.lsbService.embedPayload(coverBuffer, metadata);
 
-    // Simpan berkas citra stego PNG lossless
+    // Simpan berkas stego ke disk
     const stegoDir = path.join(process.cwd(), 'uploads', 'stego');
     if (!fs.existsSync(stegoDir)) {
       fs.mkdirSync(stegoDir, { recursive: true });
     }
-    const stegoFileName = `stego-${recipient.id}.png`;
+
+    const stegoFileName = `${recipient.id}.png`;
     const stegoFilePath = path.join(stegoDir, stegoFileName);
-    fs.writeFileSync(stegoFilePath, embedResult.stegoBuffer);
+    fs.writeFileSync(stegoFilePath, embedRes.stegoBuffer);
 
-    // Mutasi entitas sertifikat
-    recipient.sha256Hash = embedResult.sha256Hash;
-    recipient.stegoImagePath = stegoFileName;
-    recipient.mse = embedResult.mse;
-    recipient.psnr = embedResult.psnr;
-    recipient.tGenMs = embedResult.executionTimeMs;
-    recipient.status = 'TERBIT';
-    recipient.issuedAt = new Date().toISOString();
-    recipient.eventName = event.eventName;
-    recipient.organizer = event.organizer;
-
-    if (isNewRecord) {
-      this.db.certificates.unshift(recipient);
-      this.db.saveData();
+    // Simpan cover image ke disk
+    const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+    if (!fs.existsSync(coversDir)) {
+      fs.mkdirSync(coversDir, { recursive: true });
     }
+    const coverFileName = `cover-${recipient.id}.png`;
+    const coverFilePath = path.join(coversDir, coverFileName);
+    fs.writeFileSync(coverFilePath, coverBuffer);
+
+    // Perbarui entitas sertifikat di database
+    const updatedCert = await this.prisma.certificate.update({
+      where: { id: recipient.id },
+      data: {
+        sha256Hash: embedRes.sha256Hash,
+        canvasHash: embedRes.canvasHash,
+        stegoImagePath: stegoFileName,
+        coverImagePath: coverFileName,
+        status: 'TERBIT',
+        mse: embedRes.mse,
+        psnr: embedRes.psnr,
+        tGenMs: embedRes.executionTimeMs,
+        issuedAt: new Date(),
+      },
+    });
 
     return {
-      certificate: recipient,
+      certificate: updatedCert,
       embedStats: {
-        sha256Hash: embedResult.sha256Hash,
-        payloadBitsCount: embedResult.payloadBitsCount,
-        maxCapacityBits: embedResult.maxCapacityBits,
-        capacityUsagePercentage: embedResult.capacityUsagePercentage,
-        width: embedResult.width,
-        height: embedResult.height,
-        mse: embedResult.mse,
-        psnr: embedResult.psnr,
-        executionTimeMs: embedResult.executionTimeMs,
+        sha256Hash: embedRes.sha256Hash,
+        canvasHash: embedRes.canvasHash,
+        mse: embedRes.mse,
+        psnr: embedRes.psnr,
+        payloadBitsCount: embedRes.payloadBitsCount,
+        maxCapacityBits: embedRes.maxCapacityBits,
+        capacityUsagePercentage: embedRes.capacityUsagePercentage,
+        executionTimeMs: embedRes.executionTimeMs,
       },
     };
   }
@@ -311,73 +336,139 @@ export class CertificatesService {
       role?: string;
       certificateNumber?: string;
     }>,
-  ): Promise<{ totalSuccess: number; totalFailed: number; items: CertificateEntity[] }> {
-    const items: CertificateEntity[] = [];
-    let totalSuccess = 0;
-    let totalFailed = 0;
+  ): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    results: any[];
+  }> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+    });
+    if (!event) {
+      throw new NotFoundException(`Event dengan ID ${eventId} tidak ditemukan`);
+    }
+
+    const results: any[] = [];
+    let success = 0;
+    let failed = 0;
 
     for (const r of recipients) {
       try {
-        const res = await this.generateCertificate({
-          eventId,
-          recipientName: r.name,
-          recipientIdentifier: r.identifier,
-          recipientRole: r.role || 'Peserta',
-          certificateNumber: r.certificateNumber,
+        const certNum =
+          r.certificateNumber ||
+          `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+
+        let certRecord = await this.prisma.certificate.findUnique({
+          where: { certificateNumber: certNum },
         });
-        items.push(res.certificate);
-        totalSuccess++;
-      } catch (err) {
-        console.error('Gagal generate bulk item:', r, err);
-        totalFailed++;
+
+        if (!certRecord) {
+          certRecord = await this.prisma.certificate.create({
+            data: {
+              eventId,
+              certificateNumber: certNum,
+              recipientName: r.name,
+              recipientIdentifier: r.identifier,
+              recipientRole: r.role || 'Peserta',
+              sha256Hash: '',
+              status: 'BELUM_TERBIT',
+              mse: 0,
+              psnr: 0,
+            },
+          });
+        }
+
+        const genRes = await this.generateCertificateForRecipient(event, certRecord, '1080p');
+        results.push({ certificate: genRes.certificate, stats: genRes.embedStats });
+        success++;
+      } catch (err: any) {
+        console.error(`Gagal bulk generate untuk ${r.name}:`, err);
+        results.push({ name: r.name, identifier: r.identifier, error: err.message });
+        failed++;
       }
     }
 
-    return { totalSuccess, totalFailed, items };
+    return {
+      total: recipients.length,
+      success,
+      failed,
+      results,
+    };
   }
 
-  getStegoFilePath(certId: string): string {
-    const cert = this.db.certificates.find((c) => c.id === certId);
-    if (!cert) throw new NotFoundException(`Sertifikat ${certId} tidak ditemukan`);
-    if (!cert.stegoImagePath) {
-      throw new NotFoundException(`Sertifikat ${certId} belum terbit`);
-    }
-    const filePath = path.join(process.cwd(), 'uploads', 'stego', cert.stegoImagePath);
-    if (!fs.existsSync(filePath)) {
-      throw new NotFoundException('Berkas stego fisik tidak ditemukan di storage peladen');
-    }
-    return filePath;
-  }
-
-  // F-07: Unduh ZIP Banyak Sertifikat Sekaligus (Store mode / zero compression)
-  streamZipArchive(certificateIds: string[], res: Response) {
+  // Unduh Koleksi Berkas (ZIP Archive) Mode Store Lossless
+  async streamZipArchive(certificateIds: string[], res: Response) {
     if (!certificateIds || certificateIds.length === 0) {
       throw new BadRequestException('Daftar ID sertifikat tidak boleh kosong');
     }
 
-    const archive = archiver('zip', {
-      store: true, // Lossless murni tanpa re-kompresi agar bit LSB utuh (Spec F-07)
+    const certs = await this.prisma.certificate.findMany({
+      where: {
+        id: { in: certificateIds },
+        status: 'TERBIT',
+      },
     });
+
+    if (certs.length === 0) {
+      throw new NotFoundException('Tidak ada sertifikat terbit yang ditemukan');
+    }
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="E-Sertifikat-Lossless-${Date.now()}.zip"`,
+      `attachment; filename="E-Sertifikat-UINSA-${Date.now()}.zip"`,
     );
+
+    const archive = archiver('zip', {
+      store: true, // Lossless store tanpa re-kompresi DEFLATE
+    });
+
+    archive.on('error', (err: any) => {
+      console.error('Error saat membuat ZIP:', err);
+      if (!res.headersSent) {
+        res.status(500).send({ error: 'Gagal membuat arsip ZIP sertifikat' });
+      }
+    });
 
     archive.pipe(res);
 
-    for (const id of certificateIds) {
-      const cert = this.db.certificates.find((c) => c.id === id);
-      if (cert && cert.stegoImagePath) {
-        const filePath = path.join(process.cwd(), 'uploads', 'stego', cert.stegoImagePath);
+    for (const cert of certs) {
+      try {
+        const filePath = this.getStegoFilePath(cert.id);
         if (fs.existsSync(filePath)) {
           const safeName = `Sertifikat-${cert.recipientName.replace(/[^a-zA-Z0-9_-]/g, '_')}-${cert.certificateNumber.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
           archive.file(filePath, { name: safeName });
         }
+      } catch (err) {
+        console.warn(`Melewati berkas sertifikat ${cert.id}:`, err);
       }
     }
 
-    archive.finalize();
+    await archive.finalize();
+  }
+
+  /**
+   * Menemukan berkas stego PNG di storage server dengan sanitasi path traversal
+   */
+  getStegoFilePath(certId: string): string {
+    // Sanitasi certId: hanya izinkan karakter alfanumerik, dash, dan underscore
+    if (!/^[a-zA-Z0-9_-]+$/.test(certId)) {
+      throw new BadRequestException('ID sertifikat tidak valid');
+    }
+
+    const primaryPath = path.join(process.cwd(), 'uploads', 'stego', `${certId}.png`);
+    if (fs.existsSync(primaryPath)) {
+      return primaryPath;
+    }
+
+    // Fallback pencarian alternatif jika nama stegoImagePath custom
+    const fallbackDir = path.join(process.cwd(), 'uploads', 'stego');
+    const resolvedPath = path.resolve(primaryPath);
+    if (!resolvedPath.startsWith(path.resolve(fallbackDir))) {
+      throw new ForbiddenException('Akses direktori di luar batas diizinkan (Path Traversal)');
+    }
+
+    return primaryPath;
   }
 }

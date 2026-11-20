@@ -14,16 +14,20 @@ export class SimulationController {
   ) {}
 
   /**
-   * Endpoint menjalankan 9 Pengujian Black-Box (Tabel 3.1 Proposal)
+   * Endpoint menjalankan 9 Pengujian Black-Box
    */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Get('simulation/black-box')
   async runBlackBox() {
     return this.simService.runBlackBoxTesting();
   }
 
   /**
-   * Endpoint menjalankan Pengujian Reliabilitas Iterasi Sampling (Tabel 3.2 Proposal)
+   * Endpoint menjalankan Pengujian Reliabilitas Iterasi Sampling
    */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Get('simulation/iterative-test')
   async runIterativeTest(@Query('count') count?: string) {
     const num = count ? parseInt(count, 10) : 50;
@@ -31,8 +35,10 @@ export class SimulationController {
   }
 
   /**
-   * Endpoint simulasi 5 skenario Tamper Detection & Avalanche Effect (Tabel 3.4 Proposal)
+   * Endpoint simulasi 5 skenario Tamper Detection & Avalanche Effect
    */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Get('simulation/tamper-test')
   async runTamperTest() {
     return this.simService.runTamperDetectionSimulation();
@@ -50,8 +56,7 @@ export class SimulationController {
   }
 
   /**
-   * F-12: Ekspor CSV Hasil Uji (50 Sampel: 25 Full HD + 25 A4 300DPI)
-   * Sesuai Tabel 4.5 Spesifikasi REST API (/metrics/export)
+   * Ekspor CSV Hasil Uji (50 Sampel: 25 Full HD + 25 A4 300DPI)
    */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')

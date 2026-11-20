@@ -3,13 +3,12 @@ import {
   UnauthorizedException,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
-import { DatabaseService, User } from '../database/database.service';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'simulasi-lsb-uin-secret-key-2026';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h'; // Spec F-01 & 4.7
+import { PrismaService } from '../database/prisma.service';
+import { User } from '@prisma/client';
 
 interface LoginAttempt {
   count: number;
@@ -18,10 +17,30 @@ interface LoginAttempt {
 
 @Injectable()
 export class AuthService {
-  // Rate limiting login: 5 attempts per minute per IP (Spec F-01)
+  private readonly logger = new Logger(AuthService.name);
+  private readonly jwtSecret: string;
+  private readonly jwtExpiresIn: string;
+
+  // Rate limiting login: 5 attempts per minute per IP
   private loginAttempts = new Map<string, LoginAttempt>();
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly prisma: PrismaService) {
+    const envSecret = process.env.JWT_SECRET;
+    if (!envSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('FATAL: Variabel lingkungan JWT_SECRET wajib diatur di lingkungan produksi!');
+      } else {
+        this.logger.warn(
+          'Peringatan: JWT_SECRET belum diatur di lingkungan. Menggunakan secret default dev.',
+        );
+        this.jwtSecret = 'simulasi-lsb-uin-secret-key-2026-development-only';
+      }
+    } else {
+      this.jwtSecret = envSecret;
+    }
+
+    this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '1h';
+  }
 
   async login(
     usernameInput: string,
@@ -38,17 +57,31 @@ export class AuthService {
       throw new UnauthorizedException('Username atau password salah');
     }
 
-    const user = this.db.users.find(
-      (u) => u.username.toLowerCase() === username.toLowerCase(),
-    );
+    let user: User | null = null;
+    try {
+      user = await this.prisma.user.findFirst({
+        where: {
+          username: {
+            equals: username,
+            mode: 'insensitive',
+          },
+        },
+      });
+    } catch (err: any) {
+      this.logger.error('Error saat mencari user di database:', err.message);
+      throw new HttpException(
+        'Gagal menghubungi basis data autentikasi',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
 
     if (!user) {
       this.recordFailedAttempt(ipAddress);
-      // F-01: Pesan "Username atau password salah" (tidak menyebut mana yang salah)
+      // Pesan generik tanpa membocorkan eksistensi akun
       throw new UnauthorizedException('Username atau password salah');
     }
 
-    // Bandingkan password dengan hash bcrypt di tabel Users (F-01, NF-03)
+    // Bandingkan password dengan hash bcrypt di basis data Users
     let isMatch = false;
     try {
       isMatch = await bcrypt.compare(password, user.passwordHash);
@@ -71,8 +104,8 @@ export class AuthService {
       name: user.name,
     };
 
-    const accessToken = jwt.sign(payload, JWT_SECRET, {
-      expiresIn: (JWT_EXPIRES_IN as any) || '1h',
+    const accessToken = jwt.sign(payload, this.jwtSecret, {
+      expiresIn: (this.jwtExpiresIn as any) || '1h',
     });
 
     const { passwordHash, ...userClean } = user;
@@ -81,7 +114,7 @@ export class AuthService {
 
   verifyToken(token: string): any {
     try {
-      return jwt.verify(token, JWT_SECRET);
+      return jwt.verify(token, this.jwtSecret);
     } catch {
       throw new UnauthorizedException('Sesi berakhir atau token tidak valid');
     }

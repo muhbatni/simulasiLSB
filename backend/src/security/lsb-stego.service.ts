@@ -1,5 +1,4 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { PNG } from 'pngjs';
 import sharp from 'sharp';
 import { HashCryptoService } from './hash-crypto.service';
 
@@ -16,6 +15,7 @@ export interface EmbedResult {
   stegoBuffer: Buffer;
   metadata: CertificateMetadata;
   sha256Hash: string;
+  canvasHash: string;
   payloadText: string;
   payloadBitsCount: number;
   maxCapacityBits: number;
@@ -35,6 +35,8 @@ export interface VerificationResult {
   storedHash?: string;
   recomputedHash?: string;
   hashMatch?: boolean;
+  canvasHash?: string;
+  canvasHashMatch?: boolean;
   isOfficialDbRegistered?: boolean;
   extractedPayload?: string;
   executionTimeMs: number;
@@ -47,7 +49,7 @@ export class LsbSteganoService {
 
   /**
    * Algoritma 3.1: Pembangkitan Hash SHA-256 dan Penyisipan Data LSB (Embedding)
-   * Mengikuti spesifikasi Bab 4.3 dan F-06
+   * Berbasis matriks piksel Sharp raw RGBA lossless (compressionLevel: 9, palette: false)
    */
   async embedPayload(
     coverPngBuffer: Buffer,
@@ -62,7 +64,10 @@ export class LsbSteganoService {
       );
     }
 
-    // 2. Ratakan (flatten) transparansi ke latar putih jika ada transparansi (Bab 4.3)
+    // 2. Validasi panjang field di sisi server
+    this.validateMetadataFields(metadata);
+
+    // 3. Ratakan (flatten) transparansi ke latar putih jika ada kanal alfa
     let processedCoverBuffer = coverPngBuffer;
     try {
       processedCoverBuffer = await sharp(coverPngBuffer)
@@ -70,12 +75,10 @@ export class LsbSteganoService {
         .png({ compressionLevel: 9, palette: false })
         .toBuffer();
     } catch {
-      // Jika sharp gagal flatten, gunakan buffer asli
       processedCoverBuffer = coverPngBuffer;
     }
 
-    // 3. Sanitasi dan Serialisasi atribut metadata M = Nomor#Nama#Peran#Kegiatan#Tanggal#Lembaga
-    // Spesifikasi 4.3: Karakter # dan @ pada data diganti kode escape (%23 dan %40)
+    // 4. Sanitasi dan Serialisasi atribut metadata M = Nomor#Nama#Peran#Kegiatan#Tanggal#Lembaga
     const escapedNomor = this.escapeField(metadata.nomor);
     const escapedNama = this.escapeField(metadata.nama);
     const escapedPeran = this.escapeField(metadata.peran);
@@ -92,14 +95,14 @@ export class LsbSteganoService {
       escapedLembaga,
     ].join('#');
 
-    // 4. Pembangkitan hash kriptografi H = SHA-256(M) (64 hex lowercase)
+    // 5. Pembangkitan hash kriptografi H = SHA-256(M) (64 hex lowercase)
     const hashSha256 = this.hashCryptoService.computeSha256(strMetadata).toLowerCase();
 
-    // 5. Penyusunan string paket payload terintegrasi dengan delimiter
+    // 6. Penyusunan string paket payload terintegrasi dengan delimiter
     // Format: P = M + '###' + H + '@@@'
     const payloadText = `${strMetadata}###${hashSha256}@@@`;
 
-    // 6. Transformasi payload menjadi aliran bit biner (8-bit per byte)
+    // 7. Transformasi payload menjadi aliran byte dan bit biner UTF-8 (8-bit per byte)
     const payloadBuffer = Buffer.from(payloadText, 'utf8');
     const bitStream: number[] = [];
     for (let i = 0; i < payloadBuffer.length; i++) {
@@ -110,60 +113,71 @@ export class LsbSteganoService {
     }
     const payloadLen = bitStream.length;
 
-    // 7. Parsing matriks piksel citra penampung PNG
-    let coverPng: PNG;
+    // 8. Ekstraksi matriks piksel raw RGBA menggunakan Sharp
+    let coverRaw: Buffer;
+    let width: number;
+    let height: number;
+    let channels: number;
+
     try {
-      coverPng = PNG.sync.read(processedCoverBuffer);
+      const res = await sharp(processedCoverBuffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      coverRaw = res.data;
+      width = res.info.width;
+      height = res.info.height;
+      channels = res.info.channels; // 4 kanal (RGBA)
     } catch (err: any) {
       throw new BadRequestException('ERROR: Gagal membaca struktur citra PNG: ' + err.message);
     }
 
-    const { width, height } = coverPng;
     const maxCapacity = width * height * 3; // 1 bit LSB per kanal RGB
 
-    // Validasi Kapasitas: panjang bit <= lebar x tinggi x 3
+    // Validasi Kapasitas Spasial Citra
     if (payloadLen > maxCapacity) {
       throw new BadRequestException(
         `Kapasitas citra tidak mencukupi: Payload membutuhkan ${payloadLen} bit, kapasitas citra hanya ${maxCapacity} bit`,
       );
     }
 
-    // Salin data piksel untuk citra stego
-    const stegoPng = new PNG({ width, height });
-    coverPng.data.copy(stegoPng.data);
+    // Salin buffer piksel untuk penyisipan LSB
+    const stegoRaw = Buffer.from(coverRaw);
 
-    // 8. Proses Substitusi Least Significant Bit (LSB): C' = (C AND 254) OR b
+    // 9. Proses Substitusi Least Significant Bit (LSB): C' = (C AND 254) OR b
     let bitIdx = 0;
     const totalPixels = width * height;
 
     for (let p = 0; p < totalPixels && bitIdx < payloadLen; p++) {
       const pixelOffset = p * 4; // R, G, B, A
 
-      // Channel 0 (Red)
+      // Kanal Red
       if (bitIdx < payloadLen) {
-        stegoPng.data[pixelOffset] = (stegoPng.data[pixelOffset] & 0xfe) | bitStream[bitIdx++];
+        stegoRaw[pixelOffset] = (stegoRaw[pixelOffset] & 0xfe) | bitStream[bitIdx++];
       }
-      // Channel 1 (Green)
+      // Kanal Green
       if (bitIdx < payloadLen) {
-        stegoPng.data[pixelOffset + 1] =
-          (stegoPng.data[pixelOffset + 1] & 0xfe) | bitStream[bitIdx++];
+        stegoRaw[pixelOffset + 1] = (stegoRaw[pixelOffset + 1] & 0xfe) | bitStream[bitIdx++];
       }
-      // Channel 2 (Blue)
+      // Kanal Blue
       if (bitIdx < payloadLen) {
-        stegoPng.data[pixelOffset + 2] =
-          (stegoPng.data[pixelOffset + 2] & 0xfe) | bitStream[bitIdx++];
+        stegoRaw[pixelOffset + 2] = (stegoRaw[pixelOffset + 2] & 0xfe) | bitStream[bitIdx++];
       }
-      // Channel 3 (Alpha) dibiarkan tetap (255)
+      // Kanal Alpha (pixelOffset + 3) dibiarkan utuh tidak disentuh
     }
 
-    // 9. Rekonstruksi berkas citra stego PNG Lossless (compressionLevel: 9)
-    const stegoBuffer = PNG.sync.write(stegoPng, {
-      deflateLevel: 9,
-      deflateStrategy: 0,
-    });
+    // 10. Rekonstruksi citra stego PNG Lossless melalui Sharp
+    const stegoBuffer = await sharp(stegoRaw, {
+      raw: { width, height, channels: 4 },
+    })
+      .png({ compressionLevel: 9, palette: false })
+      .toBuffer();
 
-    // 10. Hitung MSE dan PSNR kualitas citra steganografi
-    const { mse, psnr } = this.calculateMseAndPsnr(coverPng, stegoPng);
+    // 11. Hitung MSE dan PSNR dari buffer raw citra cover dan stego
+    const { mse, psnr } = this.calculateMseAndPsnr(coverRaw, stegoRaw, width, height);
+
+    // 12. Hitung Canvas Hash (pengikatan integritas visual kanvas)
+    const canvasHash = this.computeCanvasHashFromRaw(stegoRaw, width, height);
 
     const executionTimeMs = Number((performance.now() - startTime).toFixed(2));
 
@@ -178,6 +192,7 @@ export class LsbSteganoService {
         lembaga: this.unescapeField(escapedLembaga),
       },
       sha256Hash: hashSha256,
+      canvasHash,
       payloadText,
       payloadBitsCount: payloadLen,
       maxCapacityBits: maxCapacity,
@@ -192,6 +207,7 @@ export class LsbSteganoService {
 
   /**
    * Algoritma 3.2: Ekstraksi Pesan LSB dan Verifikasi Integritas SHA-256 (Extract & Verify)
+   * Dilengkapi deteksi terminator byte @@@ (0x40 0x40 0x40) dan parsing UTF-8 multi-byte aman
    */
   async extractAndVerify(queryImageBuffer: Buffer): Promise<VerificationResult> {
     const startTime = performance.now();
@@ -206,9 +222,18 @@ export class LsbSteganoService {
       };
     }
 
-    let queryPng: PNG;
+    let rawBuffer: Buffer;
+    let width: number;
+    let height: number;
+
     try {
-      queryPng = PNG.sync.read(queryImageBuffer);
+      const res = await sharp(queryImageBuffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      rawBuffer = res.data;
+      width = res.info.width;
+      height = res.info.height;
     } catch {
       return {
         status: 'FORMAT_TIDAK_VALID',
@@ -218,75 +243,83 @@ export class LsbSteganoService {
       };
     }
 
-    const { width, height, data } = queryPng;
     const totalPixels = width * height;
 
-    // 2 & 3. Ekstraksi bit terendah (LSB) secara sekuensial (R, G, B)
+    // 2. Ekstraksi bit terendah (LSB) kanal R, G, B dan kumpulkan byte
     const extractedBytes: number[] = [];
     let currentByteVal = 0;
     let bitCount = 0;
-    let extractedPayload = '';
     let eofFound = false;
 
-    // Batasi pembacaan maksimal agar efisien (metadata sertifikat tidak lebih dari 20.000 karakter)
-    const MAX_CHAR_SCAN = 20000;
+    // Batas pemindaian dalam byte (50.000 byte)
+    const MAX_BYTE_SCAN = 50000;
 
     for (let p = 0; p < totalPixels; p++) {
       const pixelOffset = p * 4;
 
-      // Scan kanal R, G, B
+      // Scan kanal R (0), G (1), B (2)
       for (let c = 0; c < 3; c++) {
-        const bit = data[pixelOffset + c] & 1;
+        const bit = rawBuffer[pixelOffset + c] & 1;
         currentByteVal = (currentByteVal << 1) | bit;
         bitCount++;
 
         if (bitCount === 8) {
           extractedBytes.push(currentByteVal);
-          const char = String.fromCharCode(currentByteVal);
-          extractedPayload += char;
-
           currentByteVal = 0;
           bitCount = 0;
 
-          // Evaluasi penanda akhir berkas (EOF) '@@@'
-          if (extractedPayload.endsWith('@@@')) {
+          // Deteksi terminator @@@ pada level byte: 0x40, 0x40, 0x40
+          const byteLen = extractedBytes.length;
+          if (
+            byteLen >= 3 &&
+            extractedBytes[byteLen - 3] === 0x40 &&
+            extractedBytes[byteLen - 2] === 0x40 &&
+            extractedBytes[byteLen - 1] === 0x40
+          ) {
             eofFound = true;
             break;
           }
 
-          if (extractedPayload.length > MAX_CHAR_SCAN) {
+          if (byteLen >= MAX_BYTE_SCAN) {
             break;
           }
         }
       }
 
-      if (eofFound || extractedPayload.length > MAX_CHAR_SCAN) {
+      if (eofFound || extractedBytes.length >= MAX_BYTE_SCAN) {
         break;
       }
     }
 
+    // Hitung canvas hash dari citra yang diuji
+    const currentCanvasHash = this.computeCanvasHashFromRaw(rawBuffer, width, height);
     const executionTimeMs = Number((performance.now() - startTime).toFixed(2));
 
-    // 4. Verifikasi keberadaan penanda terminator EOF
+    // 3. Verifikasi keberadaan penanda terminator EOF
     if (!eofFound) {
       return {
         status: 'MANIPULASI_TERDETEKSI',
         isValid: false,
         message:
-          'Peringatan: Sertifikat Tidak Valid / Telah Mengalami Manipulasi Data! (Penanda @@@ tidak ditemukan)',
+          'Error: Tanda Steganografi Rusak / Tidak Ditemukan (Penanda @@@ tidak ditemukan)',
+        canvasHash: currentCanvasHash,
         executionTimeMs,
         imageDimensions: { width, height },
       };
     }
 
+    // 4. Dekode byte UTF-8 payload (tanpa 3 byte terminator @@@ di akhir)
+    const payloadBytes = Buffer.from(extractedBytes.slice(0, -3));
+    const cleanPayload = payloadBytes.toString('utf8');
+
     // 5. Penguraian struktur payload dan pemisahan segel hash
-    const cleanPayload = extractedPayload.slice(0, -3); // Buang '@@@'
     if (!cleanPayload.includes('###')) {
       return {
         status: 'MANIPULASI_TERDETEKSI',
         isValid: false,
         message:
           'Peringatan: Sertifikat Tidak Valid / Telah Mengalami Manipulasi Data! (Delimiter ### hilang)',
+        canvasHash: currentCanvasHash,
         extractedPayload: cleanPayload,
         executionTimeMs,
         imageDimensions: { width, height },
@@ -297,20 +330,33 @@ export class LsbSteganoService {
     const strMetaExt = cleanPayload.substring(0, delimiterIndex);
     const storedHash = cleanPayload.substring(delimiterIndex + 3).trim();
 
-    // 6. Perhitungan ulang hash SHA-256 dari metadata hasil ekstraksi (H_kalkulasi = SHA-256(M_ekstraksi))
-    const recomputedHash = this.hashCryptoService.computeSha256(strMetaExt).toLowerCase();
+    // 6. Validasi struktur metadata token (wajib tepat 6 token: Nomor#Nama#Peran#Kegiatan#Tanggal#Lembaga)
+    const metaTokens = strMetaExt.split('#');
+    if (metaTokens.length !== 6) {
+      return {
+        status: 'MANIPULASI_TERDETEKSI',
+        isValid: false,
+        message:
+          'Peringatan: Data Sertifikat Tidak Cocok (Format metadata rusak / jumlah token ≠ 6)',
+        canvasHash: currentCanvasHash,
+        storedHash,
+        extractedPayload: cleanPayload,
+        executionTimeMs,
+        imageDimensions: { width, height },
+      };
+    }
 
-    // 7. Komparasi integritas data secara deterministik
+    // 7. Perhitungan ulang hash SHA-256 dari metadata hasil ekstraksi
+    const recomputedHash = this.hashCryptoService.computeSha256(strMetaExt).toLowerCase();
     const hashMatch = recomputedHash === storedHash.toLowerCase();
 
-    const metaTokens = strMetaExt.split('#');
     const metadata: CertificateMetadata = {
-      nomor: this.unescapeField(metaTokens[0] || ''),
-      nama: this.unescapeField(metaTokens[1] || ''),
-      peran: this.unescapeField(metaTokens[2] || ''),
-      kegiatan: this.unescapeField(metaTokens[3] || ''),
-      tanggal: this.unescapeField(metaTokens[4] || ''),
-      lembaga: this.unescapeField(metaTokens[5] || ''),
+      nomor: this.unescapeField(metaTokens[0]),
+      nama: this.unescapeField(metaTokens[1]),
+      peran: this.unescapeField(metaTokens[2]),
+      kegiatan: this.unescapeField(metaTokens[3]),
+      tanggal: this.unescapeField(metaTokens[4]),
+      lembaga: this.unescapeField(metaTokens[5]),
     };
 
     if (hashMatch) {
@@ -322,6 +368,7 @@ export class LsbSteganoService {
         storedHash,
         recomputedHash,
         hashMatch: true,
+        canvasHash: currentCanvasHash,
         extractedPayload: cleanPayload,
         executionTimeMs,
         imageDimensions: { width, height },
@@ -336,11 +383,43 @@ export class LsbSteganoService {
         storedHash,
         recomputedHash,
         hashMatch: false,
+        canvasHash: currentCanvasHash,
         extractedPayload: cleanPayload,
         executionTimeMs,
         imageDimensions: { width, height },
       };
     }
+  }
+
+  /**
+   * Menghitung hash SHA-256 dari seluruh piksel RGB citra setelah LSB dinolkan (& 0xfe).
+   * Nilai hash ini identik sebelum dan setelah penyisipan LSB, namun sensitif terhadap
+   * manipulasi visual (pengecatan piksel, penempelan QR, modifikasi stempel/logo).
+   */
+  async computeCanvasHash(imageBuffer: Buffer): Promise<string> {
+    const { data: raw, info } = await sharp(imageBuffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    return this.computeCanvasHashFromRaw(raw, info.width, info.height);
+  }
+
+  /**
+   * Helper internal untuk menghitung Canvas Hash dari buffer raw RGBA
+   */
+  public computeCanvasHashFromRaw(rawBuffer: Buffer, width: number, height: number): string {
+    const totalPixels = width * height;
+    const rgbZeroed = Buffer.alloc(totalPixels * 3);
+    let rgbIdx = 0;
+
+    for (let p = 0; p < totalPixels; p++) {
+      const offset = p * 4;
+      rgbZeroed[rgbIdx++] = rawBuffer[offset] & 0xfe;     // Red (LSB zeroed)
+      rgbZeroed[rgbIdx++] = rawBuffer[offset + 1] & 0xfe; // Green (LSB zeroed)
+      rgbZeroed[rgbIdx++] = rawBuffer[offset + 2] & 0xfe; // Blue (LSB zeroed)
+    }
+
+    return this.hashCryptoService.computeSha256(rgbZeroed).toLowerCase();
   }
 
   /**
@@ -350,10 +429,11 @@ export class LsbSteganoService {
    * PSNR = 10 * log10( (255^2) / MSE )
    */
   calculateMseAndPsnr(
-    coverPng: PNG,
-    stegoPng: PNG,
+    coverRaw: Buffer,
+    stegoRaw: Buffer,
+    width: number,
+    height: number,
   ): { mse: number; psnr: number; totalDiffPixels: number } {
-    const { width, height } = coverPng;
     const totalPixels = width * height;
     let sumSquaredError = 0;
     let totalDiffPixels = 0;
@@ -363,7 +443,7 @@ export class LsbSteganoService {
       let pixelHasDiff = false;
 
       for (let c = 0; c < 3; c++) {
-        const diff = coverPng.data[offset + c] - stegoPng.data[offset + c];
+        const diff = coverRaw[offset + c] - stegoRaw[offset + c];
         if (diff !== 0) {
           sumSquaredError += diff * diff;
           pixelHasDiff = true;
@@ -376,7 +456,7 @@ export class LsbSteganoService {
     const totalChannels = totalPixels * 3;
     const mse = sumSquaredError / totalChannels;
 
-    // Jika MSE = 0 (identik sempurna), PSNR dibatasi 100 dB (spec F-12)
+    // Jika MSE = 0 (identik sempurna), PSNR dibatasi 100 dB
     let psnr = 100;
     if (mse > 0) {
       psnr = 10 * Math.log10((255 * 255) / mse);
@@ -390,28 +470,35 @@ export class LsbSteganoService {
   }
 
   /**
-   * Manipulasi piksel visual buatan untuk pengujian Tamper Detection (Tabel 3.4)
+   * Manipulasi piksel visual buatan untuk pengujian Tamper Detection
+   * Menggunakan Sharp raw buffer
    */
-  tamperPixel(
+  async tamperPixel(
     stegoBuffer: Buffer,
     startX = 100,
     startY = 100,
     boxSize = 20,
     color = { r: 255, g: 0, b: 0 },
-  ): Buffer {
-    const png = PNG.sync.read(stegoBuffer);
-    const { width, height, data } = png;
+  ): Promise<Buffer> {
+    const { data: raw, info } = await sharp(stegoBuffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-    for (let y = startY; y < Math.min(height, startY + boxSize); y++) {
-      for (let x = startX; x < Math.min(width, startX + boxSize); x++) {
-        const offset = (y * width + x) * 4;
-        data[offset] = color.r;
-        data[offset + 1] = color.g;
-        data[offset + 2] = color.b;
+    for (let y = startY; y < Math.min(info.height, startY + boxSize); y++) {
+      for (let x = startX; x < Math.min(info.width, startX + boxSize); x++) {
+        const offset = (y * info.width + x) * 4;
+        raw[offset] = color.r;
+        raw[offset + 1] = color.g;
+        raw[offset + 2] = color.b;
       }
     }
 
-    return PNG.sync.write(png);
+    return sharp(raw, {
+      raw: { width: info.width, height: info.height, channels: 4 },
+    })
+      .png({ compressionLevel: 9, palette: false })
+      .toBuffer();
   }
 
   /**
@@ -432,7 +519,31 @@ export class LsbSteganoService {
   }
 
   /**
-   * Escape karakter # dan @ menjadi %23 dan %40 (Spesifikasi 4.3 & F-04)
+   * Validasi panjang field metadata di sisi server
+   */
+  private validateMetadataFields(metadata: CertificateMetadata): void {
+    if (!metadata.nomor || metadata.nomor.trim().length > 100) {
+      throw new BadRequestException('Nomor sertifikat wajib diisi dan maksimal 100 karakter');
+    }
+    if (!metadata.nama || metadata.nama.trim().length > 100) {
+      throw new BadRequestException('Nama penerima wajib diisi dan maksimal 100 karakter');
+    }
+    if (metadata.peran && metadata.peran.trim().length > 30) {
+      throw new BadRequestException('Peran penerima maksimal 30 karakter');
+    }
+    if (metadata.kegiatan && metadata.kegiatan.trim().length > 150) {
+      throw new BadRequestException('Nama kegiatan maksimal 150 karakter');
+    }
+    if (metadata.tanggal && metadata.tanggal.trim().length > 30) {
+      throw new BadRequestException('Tanggal kegiatan maksimal 30 karakter');
+    }
+    if (metadata.lembaga && metadata.lembaga.trim().length > 150) {
+      throw new BadRequestException('Nama lembaga penyelenggara maksimal 150 karakter');
+    }
+  }
+
+  /**
+   * Escape karakter % (# dan @) menjadi %25 (%23 dan %40)
    */
   public escapeField(value: string | undefined): string {
     if (!value) return '';
@@ -445,6 +556,7 @@ export class LsbSteganoService {
 
   /**
    * Unescape kode %23 dan %40 kembali ke # dan @ saat ditampilkan
+   * Urutan: unescape %23 dan %40 terlebih dahulu, kemudian %25 terakhir untuk mencegah double-unescape
    */
   public unescapeField(value: string | undefined): string {
     if (!value) return '';
