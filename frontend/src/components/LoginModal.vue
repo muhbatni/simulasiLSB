@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import axios from 'axios'
+import { useAuthStore } from '../stores/auth'
 import {
   Lock,
   User,
@@ -12,7 +12,7 @@ import {
   Sparkles,
   ShieldCheck,
   UserCheck
-} from '@lucide/vue'
+} from 'lucide-vue-next'
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false }
@@ -20,8 +20,9 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'login-success'])
 
+const authStore = useAuthStore()
 const username = ref('admin')
-const password = ref('123') // Sesuai permintaan user: password tetap 123
+const password = ref('123')
 const isLoading = ref(false)
 const errorMessage = ref('')
 
@@ -35,20 +36,11 @@ const handleLogin = async () => {
   errorMessage.value = ''
 
   try {
-    const res = await axios.post('/api/auth/login', {
-      username: username.value.trim(),
-      password: password.value.trim(),
-    })
-
-    localStorage.setItem('lsb_token', res.data.accessToken)
-    emit('login-success', res.data.user)
+    const user = await authStore.login(username.value.trim(), password.value.trim())
+    emit('login-success', user)
     emit('close')
   } catch (err) {
-    if (err.response && err.response.data && err.response.data.message) {
-      errorMessage.value = err.response.data.message
-    } else {
-      errorMessage.value = 'Login gagal. Pastikan kata sandi adalah 123.'
-    }
+    errorMessage.value = authStore.error || 'Login gagal. Periksa kredensial akun Anda.'
   } finally {
     isLoading.value = false
   }

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { DatabaseService } from './database/database.service';
+import { PrismaService } from './database/prisma.service';
 import { HashCryptoService } from './security/hash-crypto.service';
 import { LsbSteganoService } from './security/lsb-stego.service';
 import { CertificateGeneratorService } from './certificates/certificate-generator.service';
@@ -28,7 +28,7 @@ import { SimulationController } from './simulation/simulation.controller';
     SimulationController,
   ],
   providers: [
-    DatabaseService,
+    PrismaService,
     HashCryptoService,
     LsbSteganoService,
     CertificateGeneratorService,

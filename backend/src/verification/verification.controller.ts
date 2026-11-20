@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { LsbSteganoService } from '../security/lsb-stego.service';
+import { extractClientIp } from '../auth/auth.controller';
 
 interface VerifRateLimit {
   count: number;
@@ -27,7 +28,7 @@ interface VerifRateLimit {
 
 @Controller('api/verification')
 export class VerificationController {
-  // Rate limiting: 20 permintaan per menit per IP (Spec F-09)
+  // Rate limiting: 20 permintaan per menit per IP
   private rateLimits = new Map<string, VerifRateLimit>();
 
   constructor(
@@ -36,7 +37,7 @@ export class VerificationController {
   ) {}
 
   /**
-   * F-09: Endpoint Verifikasi Publik E-Sertifikat (Tanpa Login)
+   * Endpoint Verifikasi Publik E-Sertifikat (Tanpa Login)
    */
   @Post('verify')
   @UseInterceptors(
@@ -52,9 +53,7 @@ export class VerificationController {
       throw new BadRequestException('Berkas citra e-sertifikat PNG harus diunggah');
     }
 
-    const ipAddress =
-      (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
-
+    const ipAddress = extractClientIp(req);
     this.checkRateLimit(ipAddress);
 
     // Cek magic bytes PNG (89 50 4E 47 0D 0A 1A 0A)
@@ -70,7 +69,7 @@ export class VerificationController {
     return this.verificationService.verifyUploadedCertificate(file.buffer, ipAddress);
   }
 
-  // F-11: Log Verifikasi hanya boleh diakses oleh Admin
+  // Log Verifikasi hanya boleh diakses oleh Admin
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Get('logs')
@@ -84,12 +83,12 @@ export class VerificationController {
     return this.verificationService.getLogs({ status, q, startDate, endDate, limit });
   }
 
-  // F-11: Ekspor CSV Log Verifikasi
+  // Ekspor CSV Log Verifikasi
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Get('logs/export-csv')
-  exportLogsCsv(@Res() res: Response) {
-    const csv = this.verificationService.exportLogsToCsv();
+  async exportLogsCsv(@Res() res: Response) {
+    const csv = await this.verificationService.exportLogsToCsv();
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader(
       'Content-Disposition',

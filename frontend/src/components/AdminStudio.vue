@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import axios from 'axios'
+import api from '../services/api'
+import { useAuthStore } from '../stores/auth'
+import { VueDatePicker } from '@vuepic/vue-datepicker'
+import '@vuepic/vue-datepicker/dist/main.css'
 import {
   Award,
   PlusCircle,
@@ -26,7 +29,7 @@ import {
   Square,
   Archive,
   Power
-} from '@lucide/vue'
+} from 'lucide-vue-next'
 
 const props = defineProps({
   user: { type: Object, default: null }
@@ -34,7 +37,9 @@ const props = defineProps({
 
 const emit = defineEmits(['login-success'])
 
-const activeSubTab = ref('recipients') // 'recipients' | 'generator' | 'events' | 'issued' | 'logs'
+const authStore = useAuthStore()
+
+const activeSubTab = ref('events') // 'events' (ujung kiri) | 'recipients' | 'generator' | 'issued' | 'logs'
 const events = ref([])
 const certificates = ref([])
 const stats = ref(null)
@@ -112,35 +117,44 @@ const logStatusFilter = ref('')
 const logSearchQuery = ref('')
 const isLoadingLogs = ref(false)
 
-const authHeaders = () => {
-  const token = localStorage.getItem('lsb_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
 const handleLogin = async () => {
   loginError.value = ''
   isLoggingIn.value = true
   try {
-    const res = await axios.post('/api/auth/login', {
-      username: loginUsername.value,
-      password: loginPassword.value,
-    })
-    localStorage.setItem('lsb_token', res.data.accessToken)
-    emit('login-success', res.data.user)
+    const user = await authStore.login(loginUsername.value, loginPassword.value)
+    emit('login-success', user)
     await loadDashboardData()
   } catch (err) {
-    loginError.value = err.response?.data?.message || 'Username atau password salah'
+    loginError.value = authStore.error || 'Username atau password salah'
   } finally {
     isLoggingIn.value = false
+  }
+}
+
+const handleDownloadCertificate = async (certId, recipientName, certNumber) => {
+  try {
+    const res = await api.get(`/certificates/${certId}/download`, {
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'image/png' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    const namePart = (recipientName || 'Penerima').replace(/[^a-zA-Z0-9_-]/g, '_')
+    const numPart = (certNumber || 'Sertifikat').replace(/[^a-zA-Z0-9_-]/g, '_')
+    link.download = `Sertifikat-${namePart}-${numPart}.png`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (err) {
+    alert(err.response?.data?.message || 'Gagal mengunduh sertifikat')
   }
 }
 
 const loadDashboardData = async () => {
   try {
     const [eventsRes, certsRes, statsRes] = await Promise.all([
-      axios.get('/api/events'),
-      axios.get('/api/certificates'),
-      axios.get('/api/verification/stats'),
+      api.get('/events'),
+      api.get('/certificates'),
+      api.get('/verification/stats'),
     ])
     events.value = eventsRes.data
     certificates.value = certsRes.data
@@ -166,9 +180,7 @@ const loadRecipients = async (eventId) => {
   isLoadingRecipients.value = true
   selectedRecipientIds.value = []
   try {
-    const res = await axios.get(`/api/events/${eventId}/recipients`, {
-      headers: authHeaders(),
-    })
+    const res = await api.get(`/events/${eventId}/recipients`)
     selectedEventRecipients.value = res.data
   } catch (err) {
     console.error('Gagal memuat penerima event:', err)
@@ -188,10 +200,9 @@ const handleAddRecipient = async () => {
   addRecipientError.value = ''
 
   try {
-    await axios.post(
-      `/api/events/${selectedEventId.value}/recipients`,
-      newRecipientForm.value,
-      { headers: authHeaders() }
+    await api.post(
+      `/events/${selectedEventId.value}/recipients`,
+      newRecipientForm.value
     )
     showAddRecipientModal.value = false
     newRecipientForm.value = {
@@ -228,13 +239,12 @@ const handlePreviewCsv = async () => {
     }
     formData.append('preview', 'true')
 
-    const res = await axios.post(
-      `/api/events/${selectedEventId.value}/recipients/import`,
+    const res = await api.post(
+      `/events/${selectedEventId.value}/recipients/import`,
       formData,
       {
         headers: {
           'Content-Type': 'multipart/form-data',
-          ...authHeaders(),
         },
       }
     )
@@ -260,13 +270,12 @@ const handleExecuteCsvImport = async () => {
     }
     formData.append('preview', 'false')
 
-    await axios.post(
-      `/api/events/${selectedEventId.value}/recipients/import`,
+    await api.post(
+      `/events/${selectedEventId.value}/recipients/import`,
       formData,
       {
         headers: {
           'Content-Type': 'multipart/form-data',
-          ...authHeaders(),
         },
       }
     )
@@ -298,14 +307,13 @@ const handleIssueSelected = async () => {
   issueResult.value = null
 
   try {
-    const res = await axios.post(
-      '/api/certificates/issue',
+    const res = await api.post(
+      '/certificates/issue',
       {
         eventId: selectedEventId.value,
         recipientIds: selectedRecipientIds.value.length > 0 ? selectedRecipientIds.value : undefined,
         resolution: issueResolution.value,
-      },
-      { headers: authHeaders() }
+      }
     )
     issueResult.value = res.data
     selectedRecipientIds.value = []
@@ -334,11 +342,10 @@ const handleDownloadZip = async () => {
   }
   isDownloadingZip.value = true
   try {
-    const res = await axios.post(
-      '/api/certificates/download-zip',
+    const res = await api.post(
+      '/certificates/download-zip',
       { certificateIds: selectedIssuedCertIds.value },
       {
-        headers: authHeaders(),
         responseType: 'blob',
       }
     )
@@ -369,10 +376,9 @@ const handleCreateEvent = async () => {
       formData.append('templateImage', newEventTemplate.value)
     }
 
-    await axios.post('/api/events', formData, {
+    await api.post('/events', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
-        ...authHeaders(),
       },
     })
 
@@ -389,10 +395,9 @@ const handleCreateEvent = async () => {
 
 const handleToggleEventActive = async (event) => {
   try {
-    await axios.patch(
-      `/api/events/${event.id}`,
-      { isActive: !event.isActive },
-      { headers: authHeaders() }
+    await api.patch(
+      `/events/${event.id}`,
+      { isActive: !event.isActive }
     )
     await loadDashboardData()
   } catch (err) {
@@ -405,7 +410,7 @@ const handleDeleteEvent = async (event) => {
   if (!confirm(confirmMsg)) return
 
   try {
-    await axios.delete(`/api/events/${event.id}`, { headers: authHeaders() })
+    await api.delete(`/events/${event.id}`)
     await loadDashboardData()
     alert('Agenda berhasil dihapus.')
   } catch (err) {
@@ -421,9 +426,7 @@ const loadLogs = async () => {
     if (logStatusFilter.value) params.append('status', logStatusFilter.value)
     if (logSearchQuery.value) params.append('q', logSearchQuery.value)
 
-    const res = await axios.get(`/api/verification/logs?${params.toString()}`, {
-      headers: authHeaders(),
-    })
+    const res = await api.get(`/verification/logs?${params.toString()}`)
     logs.value = res.data
   } catch (err) {
     console.error('Gagal memuat log:', err)
@@ -434,8 +437,7 @@ const loadLogs = async () => {
 
 const handleExportLogsCsv = async () => {
   try {
-    const res = await axios.get('/api/verification/logs/export-csv', {
-      headers: authHeaders(),
+    const res = await api.get('/verification/logs/export-csv', {
       responseType: 'blob',
     })
     const blob = new Blob([res.data], { type: 'text/csv' })
@@ -474,10 +476,9 @@ const handleSingleGenerate = async () => {
       formData.append('coverImage', customCoverFile.value)
     }
 
-    const res = await axios.post('/api/certificates/generate', formData, {
+    const res = await api.post('/certificates/generate', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
-        ...authHeaders(),
       },
     })
     genResult.value = res.data
@@ -605,7 +606,7 @@ onMounted(() => {
               <ShieldCheck :size="20" class="stat-icon text-peach" />
             </div>
             <div class="stat-number">&gt; 80 dB</div>
-            <div class="stat-foot">Standar Proposal (&ge; 45 dB)</div>
+            <div class="stat-foot">Standar Mutu (&ge; 45 dB)</div>
           </div>
         </div>
 
@@ -613,27 +614,19 @@ onMounted(() => {
         <div class="studio-tabs glass-card">
           <button
             class="s-tab-btn"
-            :class="{ active: activeSubTab === 'recipients' }"
-            @click="activeSubTab = 'recipients'"
-          >
-            <UserCheck :size="16" />
-            <span>Penerima &amp; Penerbitan (F-04, 05, 06)</span>
-          </button>
-          <button
-            class="s-tab-btn"
-            :class="{ active: activeSubTab === 'issued' }"
-            @click="activeSubTab = 'issued'"
-          >
-            <Archive :size="16" />
-            <span>Unduh Berkas / ZIP (F-07)</span>
-          </button>
-          <button
-            class="s-tab-btn"
             :class="{ active: activeSubTab === 'events' }"
             @click="activeSubTab = 'events'"
           >
             <Calendar :size="16" />
-            <span>Manajemen Event (F-03)</span>
+            <span>Manajemen Event</span>
+          </button>
+          <button
+            class="s-tab-btn"
+            :class="{ active: activeSubTab === 'recipients' }"
+            @click="activeSubTab = 'recipients'"
+          >
+            <UserCheck :size="16" />
+            <span>Penerima &amp; Penerbitan</span>
           </button>
           <button
             class="s-tab-btn"
@@ -645,11 +638,19 @@ onMounted(() => {
           </button>
           <button
             class="s-tab-btn"
+            :class="{ active: activeSubTab === 'issued' }"
+            @click="activeSubTab = 'issued'"
+          >
+            <Archive :size="16" />
+            <span>Unduh Berkas / ZIP</span>
+          </button>
+          <button
+            class="s-tab-btn"
             :class="{ active: activeSubTab === 'logs' }"
             @click="activeSubTab = 'logs'"
           >
             <Activity :size="16" />
-            <span>Log Audit Verifikasi (F-11)</span>
+            <span>Log Audit Verifikasi</span>
           </button>
         </div>
 
@@ -674,11 +675,11 @@ onMounted(() => {
                 </a>
                 <button class="btn btn-secondary btn-sm" @click="showCsvImportModal = true">
                   <FileSpreadsheet :size="14" />
-                  <span>Impor CSV (F-05)</span>
+                  <span>Impor CSV</span>
                 </button>
                 <button class="btn btn-primary btn-sm" @click="showAddRecipientModal = true">
                   <PlusCircle :size="14" />
-                  <span>Tambah Penerima (F-04)</span>
+                  <span>Tambah Penerima</span>
                 </button>
               </div>
             </div>
@@ -701,7 +702,7 @@ onMounted(() => {
               >
                 <RefreshCw v-if="isIssuing" :size="14" class="spin-icon" />
                 <Award v-else :size="14" />
-                <span>{{ isIssuing ? 'Menghitung SHA-256 & Embedding LSB...' : 'Terbitkan Sertifikat (F-06)' }}</span>
+                <span>{{ isIssuing ? 'Menghitung SHA-256 & Embedding LSB...' : 'Terbitkan Sertifikat' }}</span>
               </button>
             </div>
 
@@ -761,16 +762,16 @@ onMounted(() => {
                       {{ r.sha256Hash ? r.sha256Hash.slice(0, 16) + '...' : '-' }}
                     </td>
                     <td>
-                      <a
+                      <button
                         v-if="r.status === 'TERBIT'"
-                        :href="`/api/certificates/${r.id}/download`"
-                        download
+                        type="button"
                         class="btn btn-secondary btn-sm"
                         title="Unduh PNG Asli"
+                        @click="handleDownloadCertificate(r.id, r.recipientName, r.certificateNumber)"
                       >
                         <Download :size="12" />
                         <span>Unduh</span>
-                      </a>
+                      </button>
                       <span v-else class="text-faint text-xs">Menunggu terbit</span>
                     </td>
                   </tr>
@@ -849,10 +850,14 @@ onMounted(() => {
                     <td class="font-mono text-emerald">{{ c.psnr }} dB</td>
                     <td class="font-mono text-xs">{{ c.sha256Hash?.slice(0, 16) }}...</td>
                     <td>
-                      <a :href="`/api/certificates/${c.id}/download`" download class="btn btn-secondary btn-sm">
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        @click="handleDownloadCertificate(c.id, c.recipientName, c.certificateNumber)"
+                      >
                         <Download :size="13" />
                         <span>PNG</span>
-                      </a>
+                      </button>
                     </td>
                   </tr>
                   <tr v-if="certificates.length === 0">
@@ -886,7 +891,16 @@ onMounted(() => {
 
                 <div class="form-group">
                   <label class="form-label">Tanggal Pelaksanaan</label>
-                  <input type="date" v-model="newEventForm.eventDate" class="form-input" required />
+                  <VueDatePicker
+                    v-model="newEventForm.eventDate"
+                    model-type="yyyy-MM-dd"
+                    format="yyyy-MM-dd"
+                    :enable-time-picker="false"
+                    auto-apply
+                    placeholder="Pilih Tanggal Pelaksanaan"
+                    dark
+                    required
+                  />
                 </div>
 
                 <div class="form-group">
@@ -1066,14 +1080,14 @@ onMounted(() => {
                   <div class="code-box">{{ genResult.embedStats.sha256Hash }}</div>
                 </div>
 
-                <a
-                  :href="`/api/certificates/${genResult.certificate.id}/download`"
-                  download
+                <button
+                  type="button"
                   class="btn btn-primary btn-block"
+                  @click="handleDownloadCertificate(genResult.certificate.id, genResult.certificate.recipientName, genResult.certificate.certificateNumber)"
                 >
                   <Download :size="16" />
                   <span>Unduh Berkas Stego PNG Asli</span>
-                </a>
+                </button>
               </div>
               <div v-else class="empty-gen-state">
                 <Award :size="48" class="text-faint" />
@@ -1113,7 +1127,7 @@ onMounted(() => {
 
               <button class="btn btn-primary btn-sm" @click="handleExportLogsCsv">
                 <Download :size="14" />
-                <span>Ekspor CSV Log (F-11)</span>
+                <span>Ekspor CSV Log</span>
               </button>
             </div>
 
@@ -1167,7 +1181,7 @@ onMounted(() => {
     <div v-if="showAddRecipientModal" class="modal-backdrop" @click="showAddRecipientModal = false">
       <div class="modal-dialog glass-card" @click.stop style="max-width: 500px;">
         <div class="modal-header">
-          <h3 class="modal-title">Tambah Calon Penerima (F-04)</h3>
+          <h3 class="modal-title">Tambah Calon Penerima</h3>
           <button class="close-btn" @click="showAddRecipientModal = false">&times;</button>
         </div>
         <form @submit.prevent="handleAddRecipient" class="modal-body">
@@ -1212,7 +1226,7 @@ onMounted(() => {
     <div v-if="showCsvImportModal" class="modal-backdrop" @click="showCsvImportModal = false">
       <div class="modal-dialog glass-card" @click.stop style="max-width: 650px;">
         <div class="modal-header">
-          <h3 class="modal-title">Impor Massal Penerima CSV (F-05)</h3>
+          <h3 class="modal-title">Impor Massal Penerima CSV</h3>
           <button class="close-btn" @click="showCsvImportModal = false">&times;</button>
         </div>
         <div class="modal-body">
@@ -1848,5 +1862,46 @@ onMounted(() => {
   .grid-2-col {
     grid-template-columns: 1fr;
   }
+}
+
+/* Custom VueDatePicker theme integration */
+:deep(.dp__theme_dark) {
+  --dp-background-color: #121826;
+  --dp-text-color: #f1f5f9;
+  --dp-hover-color: rgba(218, 101, 86, 0.18);
+  --dp-hover-text-color: #ffffff;
+  --dp-hover-icon-color: #ffffff;
+  --dp-primary-color: #da6556;
+  --dp-primary-disabled-color: rgba(218, 101, 86, 0.5);
+  --dp-primary-text-color: #ffffff;
+  --dp-secondary-color: #94a3b8;
+  --dp-border-color: rgba(255, 255, 255, 0.14);
+  --dp-menu-border-color: rgba(255, 255, 255, 0.18);
+  --dp-border-color-hover: #da6556;
+  --dp-disabled-color: #475569;
+  --dp-scroll-bar-background: #1e293b;
+  --dp-scroll-bar-color: #475569;
+  --dp-success-color: #10b981;
+  --dp-icon-color: #94a3b8;
+  --dp-danger-color: #ef4444;
+}
+:deep(.dp__input) {
+  border-radius: 8px !important;
+  background: rgba(15, 23, 42, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #f8fafc !important;
+  font-size: 0.9rem !important;
+  padding: 10px 14px 10px 38px !important;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+:deep(.dp__input:focus) {
+  border-color: #da6556 !important;
+  box-shadow: 0 0 0 2px rgba(218, 101, 86, 0.25) !important;
+}
+:deep(.dp__menu) {
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 </style>

@@ -16,14 +16,18 @@ export interface AvalancheResult {
 export class HashCryptoService {
   /**
    * Menghitung nilai intisari hash SHA-256 deterministik 64 digit heksadesimal (256-bit)
+   * Menerima string (UTF-8) atau Buffer
    */
-  computeSha256(text: string): string {
-    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+  computeSha256(data: string | Buffer): string {
+    if (Buffer.isBuffer(data)) {
+      return crypto.createHash('sha256').update(data).digest('hex');
+    }
+    return crypto.createHash('sha256').update(data, 'utf8').digest('hex');
   }
 
   /**
    * Menghitung efek longsor (avalanche effect) antara dua teks
-   * Digunakan untuk simulasi dan validasi pengujian integritas (Bab 3.1.4.4)
+   * Digunakan untuk simulasi dan validasi pengujian integritas
    */
   calculateAvalancheEffect(originalText: string, modifiedText: string): AvalancheResult {
     const originalHash = this.computeSha256(originalText);

@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import { ref, onMounted, computed } from 'vue'
+import { useAuthStore } from './stores/auth'
 import Navbar from './components/Navbar.vue'
 import HeroVerifier from './components/HeroVerifier.vue'
 import TheorySection from './components/TheorySection.vue'
@@ -10,9 +10,11 @@ import ResearchLab from './components/ResearchLab.vue'
 import Footer from './components/Footer.vue'
 import LoginModal from './components/LoginModal.vue'
 
+const authStore = useAuthStore()
 const activeTab = ref('verify') // 'verify' | 'student' | 'admin' | 'lab'
-const currentUser = ref(null)
 const isLoginModalOpen = ref(false)
+
+const currentUser = computed(() => authStore.user)
 
 const changeTab = (tab) => {
   activeTab.value = tab
@@ -28,11 +30,8 @@ const closeLoginModal = () => {
 }
 
 const handleLoginSuccess = (user) => {
-  currentUser.value = user
   isLoginModalOpen.value = false
-
-  // Bedakan routing dari role akun yang masuk
-  if (user.role === 'admin') {
+  if (user?.role === 'admin') {
     activeTab.value = 'admin'
   } else {
     activeTab.value = 'student'
@@ -40,27 +39,16 @@ const handleLoginSuccess = (user) => {
 }
 
 const handleLogout = () => {
-  localStorage.removeItem('lsb_token')
-  currentUser.value = null
+  authStore.logout()
   activeTab.value = 'verify'
 }
 
-const checkExistingAuth = async () => {
-  const token = localStorage.getItem('lsb_token')
-  if (!token) return
-  try {
-    const res = await axios.get('/api/auth/profile', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    currentUser.value = res.data.user
-  } catch {
-    localStorage.removeItem('lsb_token')
-    currentUser.value = null
-  }
-}
-
-onMounted(() => {
-  checkExistingAuth()
+onMounted(async () => {
+  await authStore.fetchProfile()
+  window.addEventListener('auth:expired', () => {
+    authStore.logout()
+    activeTab.value = 'verify'
+  })
 })
 </script>
 

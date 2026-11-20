@@ -1,5 +1,5 @@
 <script setup>
-import { ShieldCheck, Lock, EyeOff, FileCode2, AlertOctagon, CheckCircle2 } from '@lucide/vue'
+import { ShieldCheck, Lock, EyeOff, FileCode2, AlertOctagon, CheckCircle2 } from 'lucide-vue-next'
 </script>
 
 <template>
