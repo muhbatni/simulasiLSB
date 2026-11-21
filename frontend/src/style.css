@@ -362,3 +362,44 @@ body {
   color: var(--c-fd);
   word-break: break-all;
 }
+
+/* Input with Lock & Spoiler Styling */
+.input-with-lock-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.input-locked {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(253, 183, 115, 0.35) !important;
+  color: var(--c-fd, #fdb773) !important;
+  font-weight: 600;
+  cursor: not-allowed !important;
+  padding-right: 42px !important;
+}
+
+.input-lock-icon {
+  position: absolute;
+  right: 14px;
+  color: var(--c-fd, #fdb773);
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.d-flex {
+  display: flex;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.align-center {
+  align-items: center;
+}
+
+.mb-1 {
+  margin-bottom: 6px;
+}

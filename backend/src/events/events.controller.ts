@@ -54,6 +54,13 @@ export class EventsController {
     return this.eventsService.getEventById(id);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/next-certificate-number')
+  async getNextCertificateNumber(@Param('id') id: string) {
+    const nextCertificateNumber = await this.eventsService.getNextCertificateNumber(id);
+    return { nextCertificateNumber };
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Post()

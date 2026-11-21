@@ -37,10 +37,16 @@ export class EventsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return events.map((evt) => ({
-      ...evt,
-      totalCertificates: evt._count.certificates,
-    }));
+    return Promise.all(
+      events.map(async (evt) => {
+        const nextCertificateNumber = await this.getNextCertificateNumber(evt.id);
+        return {
+          ...evt,
+          totalCertificates: evt._count.certificates,
+          nextCertificateNumber,
+        };
+      }),
+    );
   }
 
   async getEventById(id: string): Promise<any> {
@@ -61,9 +67,12 @@ export class EventsService {
       throw new NotFoundException(`Event dengan ID ${id} tidak ditemukan`);
     }
 
+    const nextCertificateNumber = await this.getNextCertificateNumber(evt.id);
+
     return {
       ...evt,
       totalCertificates: evt._count.certificates,
+      nextCertificateNumber,
     };
   }
 

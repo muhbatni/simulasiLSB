@@ -133,6 +133,34 @@ const genError = ref('')
 const currentEvent = computed(() => events.value.find((e) => e.id === selectedEventId.value))
 const selectedEventForGen = computed(() => events.value.find((e) => e.id === genForm.value.eventId))
 
+// Status penguncian dan nomor spoiler untuk Penerbitan Cepat
+const hasEventPrefix = computed(() => {
+  return !!(selectedEventForGen.value?.certificatePrefix && selectedEventForGen.value.certificatePrefix.trim())
+})
+
+const nextCertSpoiler = computed(() => {
+  if (!selectedEventForGen.value) return ''
+  if (selectedEventForGen.value.nextCertificateNumber) {
+    return selectedEventForGen.value.nextCertificateNumber
+  }
+  const prefix = selectedEventForGen.value.certificatePrefix || '041/HIMAPROSIF/XI/2026/'
+  return prefix + '001'
+})
+
+// Status penguncian dan nomor spoiler untuk Modal Tambah Penerima
+const currentEventHasPrefix = computed(() => {
+  return !!(currentEvent.value?.certificatePrefix && currentEvent.value.certificatePrefix.trim())
+})
+
+const currentEventNextSpoiler = computed(() => {
+  if (!currentEvent.value) return ''
+  if (currentEvent.value.nextCertificateNumber) {
+    return currentEvent.value.nextCertificateNumber
+  }
+  const prefix = currentEvent.value.certificatePrefix || '041/HIMAPROSIF/XI/2026/'
+  return prefix + '001'
+})
+
 // Audit Logs Filter (F-11)
 const logStatusFilter = ref('')
 const logSearchQuery = ref('')
@@ -221,9 +249,16 @@ const handleAddRecipient = async () => {
   addRecipientError.value = ''
 
   try {
+    const certNum = currentEventHasPrefix.value
+      ? currentEventNextSpoiler.value
+      : newRecipientForm.value.certificateNumber
+
     await api.post(
       `/events/${selectedEventId.value}/recipients`,
-      newRecipientForm.value
+      {
+        ...newRecipientForm.value,
+        certificateNumber: certNum,
+      }
     )
     showAddRecipientModal.value = false
     newRecipientForm.value = {
@@ -233,6 +268,7 @@ const handleAddRecipient = async () => {
       recipientRole: 'Peserta',
     }
     await loadRecipients(selectedEventId.value)
+    await loadDashboardData()
   } catch (err) {
     addRecipientError.value = err.response?.data?.message || 'Gagal menambahkan penerima'
   } finally {
@@ -574,7 +610,10 @@ const handleSingleGenerate = async () => {
     formData.append('recipientName', genForm.value.recipientName)
     formData.append('recipientIdentifier', genForm.value.recipientIdentifier)
     formData.append('recipientRole', genForm.value.recipientRole)
-    if (genForm.value.certificateNumber) {
+    // Jika agenda kegiatan telah memiliki pola nomor di manajemen event, gunakan nomor spoiler otomatis
+    if (hasEventPrefix.value) {
+      formData.append('certificateNumber', nextCertSpoiler.value)
+    } else if (genForm.value.certificateNumber) {
       formData.append('certificateNumber', genForm.value.certificateNumber)
     }
     formData.append('resolution', genForm.value.resolution)
@@ -1181,14 +1220,25 @@ onMounted(() => {
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">Nomor Sertifikat (Opsional)</label>
-                  <input
-                    type="text"
-                    v-model="genForm.certificateNumber"
-                    class="form-input font-mono"
-                    :placeholder="selectedEventForGen?.certificatePrefix ? selectedEventForGen.certificatePrefix + '001' : 'Contoh: 041/HIMAPROSIF/XI/2026/001'"
-                  />
-                  <small class="form-hint">
+                  <label class="form-label">Nomor Sertifikat</label>
+
+                  <div class="input-with-lock-wrap">
+                    <input
+                      type="text"
+                      :value="hasEventPrefix ? nextCertSpoiler : genForm.certificateNumber"
+                      @input="e => { if (!hasEventPrefix) genForm.certificateNumber = e.target.value }"
+                      :disabled="hasEventPrefix"
+                      class="form-input font-mono"
+                      :class="{ 'input-locked': hasEventPrefix }"
+                      :placeholder="hasEventPrefix ? nextCertSpoiler : 'Contoh: 041/HIMAPROSIF/XI/2026/001'"
+                    />
+                    <Lock v-if="hasEventPrefix" :size="16" class="input-lock-icon" />
+                  </div>
+
+                  <small v-if="hasEventPrefix" class="form-hint text-gold">
+                    🔒 <strong>Nomor Dinonaktifkan:</strong> Telah diatur pada manajemen event. Sertifikat ini otomatis akan diterbitkan dengan nomor: <strong class="text-white">{{ nextCertSpoiler }}</strong>.
+                  </small>
+                  <small v-else class="form-hint">
                     Kosongkan untuk penomoran otomatis berurutan sesuai pola agenda event: <code>{{ selectedEventForGen?.certificatePrefix || '041/HIMAPROSIF/XI/2026/' }}001</code>
                   </small>
                 </div>
@@ -1489,15 +1539,26 @@ onMounted(() => {
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Nomor Sertifikat (Opsional, unik)</label>
-            <input
-              type="text"
-              v-model="newRecipientForm.certificateNumber"
-              class="form-input font-mono"
-              :placeholder="currentEvent?.certificatePrefix ? 'Otomatis: ' + currentEvent.certificatePrefix + '001' : 'Otomatis digenerate jika kosong'"
-            />
-            <small class="form-hint">
-              Kosongkan untuk penomoran otomatis berurutan sesuai pola agenda event (<code>{{ currentEvent?.certificatePrefix || '041/HIMAPROSIF/XI/2026/' }}001</code>)
+            <label class="form-label">Nomor Sertifikat</label>
+
+            <div class="input-with-lock-wrap">
+              <input
+                type="text"
+                :value="currentEventHasPrefix ? currentEventNextSpoiler : newRecipientForm.certificateNumber"
+                @input="e => { if (!currentEventHasPrefix) newRecipientForm.certificateNumber = e.target.value }"
+                :disabled="currentEventHasPrefix"
+                class="form-input font-mono"
+                :class="{ 'input-locked': currentEventHasPrefix }"
+                :placeholder="currentEventHasPrefix ? currentEventNextSpoiler : 'Otomatis digenerate jika kosong'"
+              />
+              <Lock v-if="currentEventHasPrefix" :size="16" class="input-lock-icon" />
+            </div>
+
+            <small v-if="currentEventHasPrefix" class="form-hint text-gold">
+              🔒 <strong>Nomor Dinonaktifkan:</strong> Calon penerima ini otomatis mendapatkan nomor: <strong class="text-white">{{ currentEventNextSpoiler }}</strong>.
+            </small>
+            <small v-else class="form-hint">
+              Kosongkan untuk penomoran otomatis berurutan sesuai pola agenda event.
             </small>
           </div>
 
