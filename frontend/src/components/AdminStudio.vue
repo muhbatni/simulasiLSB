@@ -204,6 +204,63 @@ const handleDownloadCertificate = async (certId, recipientName, certNumber) => {
   }
 }
 
+// State Modal Pratinjau Citra PNG (Lossless LSB Stego)
+const previewCert = ref(null)
+const previewCertImageUrl = ref(null)
+const isLoadingPreviewImage = ref(false)
+const isVerifyingStored = ref(false)
+const storedVerificationResult = ref(null)
+
+const openCertPreview = async (cert) => {
+  if (!cert) return
+  const event = events.value.find((e) => e.id === cert.eventId)
+  previewCert.value = {
+    ...cert,
+    eventName: cert.eventName || event?.eventName || 'Agenda Kegiatan',
+    eventDate: cert.eventDate || event?.eventDate || '',
+    organizer: cert.organizer || event?.organizer || '',
+  }
+  storedVerificationResult.value = null
+  previewCertImageUrl.value = null
+  isLoadingPreviewImage.value = true
+
+  try {
+    const res = await api.get(`/certificates/${cert.id}/download`, {
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'image/png' })
+    previewCertImageUrl.value = URL.createObjectURL(blob)
+  } catch (err) {
+    dialog.error('Gagal memuat pratinjau sertifikat digital')
+  } finally {
+    isLoadingPreviewImage.value = false
+  }
+}
+
+const closeCertPreview = () => {
+  if (previewCertImageUrl.value) {
+    URL.revokeObjectURL(previewCertImageUrl.value)
+  }
+  previewCert.value = null
+  previewCertImageUrl.value = null
+  isLoadingPreviewImage.value = false
+  storedVerificationResult.value = null
+}
+
+const verifyStoredCertificate = async (certId) => {
+  if (!certId) return
+  isVerifyingStored.value = true
+  storedVerificationResult.value = null
+  try {
+    const res = await api.post(`/me/certificates/${certId}/verify`, {})
+    storedVerificationResult.value = res.data
+  } catch (err) {
+    dialog.error(err.response?.data?.message || 'Gagal memverifikasi berkas sertifikat di peladen')
+  } finally {
+    isVerifyingStored.value = false
+  }
+}
+
 const loadDashboardData = async () => {
   try {
     const [eventsRes, certsRes, statsRes] = await Promise.all([
@@ -1134,16 +1191,27 @@ onMounted(() => {
                       {{ r.sha256Hash ? r.sha256Hash.slice(0, 16) + '...' : '-' }}
                     </td>
                     <td>
-                      <button
-                        v-if="r.status === 'TERBIT'"
-                        type="button"
-                        class="btn btn-secondary btn-sm"
-                        title="Unduh PNG Asli"
-                        @click="handleDownloadCertificate(r.id, r.recipientName, r.certificateNumber)"
-                      >
-                        <Download :size="12" />
-                        <span>Unduh</span>
-                      </button>
+                      <div v-if="r.status === 'TERBIT'" style="display: inline-flex; align-items: center; gap: 6px;">
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          title="Pratinjau Citra PNG"
+                          @click="openCertPreview(r)"
+                          style="border-color: rgba(253, 183, 115, 0.4); color: #fdb773;"
+                        >
+                          <Eye :size="13" />
+                          <span>Preview</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          title="Unduh PNG Asli"
+                          @click="handleDownloadCertificate(r.id, r.recipientName, r.certificateNumber)"
+                        >
+                          <Download :size="12" />
+                          <span>Unduh</span>
+                        </button>
+                      </div>
                       <span v-else class="text-faint text-xs">Menunggu terbit</span>
                     </td>
                   </tr>
@@ -1222,14 +1290,27 @@ onMounted(() => {
                     <td class="font-mono text-emerald">{{ c.psnr }} dB</td>
                     <td class="font-mono text-xs">{{ c.sha256Hash?.slice(0, 16) }}...</td>
                     <td>
-                      <button
-                        type="button"
-                        class="btn btn-secondary btn-sm"
-                        @click="handleDownloadCertificate(c.id, c.recipientName, c.certificateNumber)"
-                      >
-                        <Download :size="13" />
-                        <span>PNG</span>
-                      </button>
+                      <div style="display: inline-flex; align-items: center; gap: 6px;">
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          title="Pratinjau Citra PNG"
+                          @click="openCertPreview(c)"
+                          style="border-color: rgba(253, 183, 115, 0.4); color: #fdb773;"
+                        >
+                          <Eye :size="13" />
+                          <span>Preview</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          title="Unduh PNG Asli"
+                          @click="handleDownloadCertificate(c.id, c.recipientName, c.certificateNumber)"
+                        >
+                          <Download :size="13" />
+                          <span>PNG</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   <tr v-if="certificates.length === 0">
@@ -1538,14 +1619,27 @@ onMounted(() => {
                   <div class="code-box">{{ genResult.embedStats.sha256Hash }}</div>
                 </div>
 
-                <button
-                  type="button"
-                  class="btn btn-primary btn-block"
-                  @click="handleDownloadCertificate(genResult.certificate.id, genResult.certificate.recipientName, genResult.certificate.certificateNumber)"
-                >
-                  <Download :size="16" />
-                  <span>Unduh Berkas Stego PNG Asli</span>
-                </button>
+                <div style="display: flex; gap: 10px; margin-top: 6px;">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    title="Pratinjau Citra PNG"
+                    @click="openCertPreview(genResult.certificate)"
+                    style="flex: 1; border-color: rgba(253, 183, 115, 0.4); color: #fdb773; justify-content: center;"
+                  >
+                    <Eye :size="15" />
+                    <span>Pratinjau PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    @click="handleDownloadCertificate(genResult.certificate.id, genResult.certificate.recipientName, genResult.certificate.certificateNumber)"
+                    style="flex: 1; justify-content: center;"
+                  >
+                    <Download :size="15" />
+                    <span>Unduh PNG</span>
+                  </button>
+                </div>
               </div>
               <div v-else class="empty-gen-state">
                 <Award :size="48" class="text-faint" />
@@ -2264,6 +2358,127 @@ onMounted(() => {
           >
             <RefreshCw v-if="isImportingCsv" :size="14" class="spin-icon" />
             <span>Simpan {{ csvPreviewData?.validCount || 0 }} Baris Valid</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Pratinjau Citra E-Sertifikat PNG (Lossless LSB Stego) -->
+    <div v-if="previewCert" class="modal-backdrop" @click="closeCertPreview">
+      <div class="modal-dialog glass-card" @click.stop style="max-width: 860px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <Award :size="24" class="text-gold" />
+            <div>
+              <h3 class="modal-title" style="margin: 0; line-height: 1.2;">{{ previewCert.recipientName }}</h3>
+              <p class="modal-sub font-mono text-gold" style="margin: 4px 0 0; font-size: 0.85rem;">{{ previewCert.certificateNumber }}</p>
+            </div>
+          </div>
+          <button class="close-btn" @click="closeCertPreview">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Image Preview Display -->
+          <div class="modal-img-wrap" style="background: #09090b; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); margin-bottom: 16px; text-align: center; position: relative; min-height: 220px; display: flex; align-items: center; justify-content: center;">
+            <div v-if="isLoadingPreviewImage" style="padding: 50px 20px; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 12px;">
+              <RefreshCw :size="32" class="spin-icon text-brand" />
+              <span style="font-size: 0.9rem;">Memuat citra lossless PNG langsung dari media penyimpanan peladen...</span>
+            </div>
+            <img
+              v-else-if="previewCertImageUrl"
+              :src="previewCertImageUrl"
+              alt="Pratinjau E-Sertifikat PNG"
+              style="max-width: 100%; max-height: 55vh; object-fit: contain; display: block; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5);"
+            />
+            <div v-else style="padding: 40px; color: var(--text-muted);">
+              Citra sertifikat tidak tersedia
+            </div>
+          </div>
+
+          <!-- Metadata Grid -->
+          <div class="modal-meta-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 16px;">
+            <div class="m-item">
+              <span class="k" style="font-size: 0.72rem; color: var(--text-muted);">Agenda Kegiatan</span>
+              <span class="v" style="font-size: 0.9rem; font-weight: 600; color: #fff;">{{ previewCert.eventName }}</span>
+            </div>
+            <div class="m-item">
+              <span class="k" style="font-size: 0.72rem; color: var(--text-muted);">NIM / Identifikasi</span>
+              <span class="v font-mono" style="font-size: 0.9rem; font-weight: 600; color: #fff;">{{ previewCert.recipientIdentifier }}</span>
+            </div>
+            <div class="m-item">
+              <span class="k" style="font-size: 0.72rem; color: var(--text-muted);">Peran Partisipasi</span>
+              <span class="v" style="font-size: 0.9rem; font-weight: 600; color: #fff;">{{ previewCert.recipientRole || 'Peserta' }}</span>
+            </div>
+            <div class="m-item">
+              <span class="k" style="font-size: 0.72rem; color: var(--text-muted);">Kualitas Steganografi (PSNR / MSE)</span>
+              <span class="v font-mono text-emerald" style="font-size: 0.9rem; font-weight: 600;">
+                PSNR: {{ previewCert.psnr || '-' }} dB (MSE: {{ previewCert.mse || '0' }})
+              </span>
+            </div>
+            <div class="m-item" style="grid-column: 1 / -1;">
+              <span class="k" style="font-size: 0.72rem; color: var(--text-muted);">Segel Integritas Kriptografis (SHA-256 Digest)</span>
+              <div class="code-box" style="font-family: monospace; font-size: 0.75rem; color: #fdb773; word-break: break-all; margin-top: 2px;">
+                {{ previewCert.sha256Hash || '-' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Server Verification Ribbon -->
+          <div class="verif-check-box" style="background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <h4 style="font-size: 0.88rem; font-weight: 600; color: #fff; margin: 0 0 2px;">Uji Keabsahan Berkas di Peladen</h4>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0;">
+                  Mengekstrak bit LSB pada citra PNG tersimpan dan mencocokkan ulang segel hash SHA-256 secara deterministik.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="isVerifyingStored"
+                @click="verifyStoredCertificate(previewCert.id)"
+              >
+                <RefreshCw v-if="isVerifyingStored" :size="14" class="spin-icon" />
+                <ShieldCheck v-else :size="14" />
+                <span>{{ isVerifyingStored ? 'Mengekstrak LSB...' : 'Verifikasi Integritas' }}</span>
+              </button>
+            </div>
+
+            <!-- Hasil Verifikasi -->
+            <div
+              v-if="storedVerificationResult"
+              style="margin-top: 12px; padding: 10px 14px; border-radius: 6px; display: flex; align-items: center; gap: 10px;"
+              :style="storedVerificationResult.isValid ? 'background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35);' : 'background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35);'"
+            >
+              <CheckCircle2 v-if="storedVerificationResult.isValid" :size="20" class="text-emerald" />
+              <AlertTriangle v-else :size="20" class="text-danger" />
+              <div>
+                <strong :class="storedVerificationResult.isValid ? 'text-emerald' : 'text-danger'" style="font-size: 0.88rem;">
+                  {{ storedVerificationResult.message }}
+                </strong>
+                <p class="text-xs text-muted" style="margin: 2px 0 0;">
+                  Waktu Ekstraksi: {{ storedVerificationResult.executionTimeMs }} ms &bull; Status Hash: {{ storedVerificationResult.hashMatch ? 'Cocok Sempurna (256-bit Bit-Exact)' : 'Tidak Cocok' }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Peringatan Lossless Format -->
+          <div style="display: flex; align-items: center; gap: 10px; background: rgba(253, 183, 115, 0.08); border: 1px solid rgba(253, 183, 115, 0.25); padding: 10px 14px; border-radius: 6px; font-size: 0.78rem; color: #fdb773;">
+            <AlertTriangle :size="16" style="flex-shrink: 0;" />
+            <span>Penting: Berkas citra ini berformat PNG lossless dengan bit rahasia LSB. Jangan lakukan kompresi lossy (seperti upload ke status/chat media sosial standar tanpa dokumen) agar segel integritas tetap valid saat diverifikasi.</span>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 16px;">
+          <button type="button" class="btn btn-secondary" @click="closeCertPreview">Tutup</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            @click="handleDownloadCertificate(previewCert.id, previewCert.recipientName, previewCert.certificateNumber)"
+          >
+            <Download :size="15" />
+            <span>Unduh Berkas PNG Asli</span>
           </button>
         </div>
       </div>
