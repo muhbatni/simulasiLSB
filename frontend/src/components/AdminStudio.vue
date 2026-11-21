@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import api from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import { useDialogStore } from '../stores/dialog'
@@ -637,13 +637,34 @@ let resizeStartY = 0
 let resizeStartFontSize = 32
 
 const autocratCanvasWidth = ref(800)
+let canvasResizeObserver = null
+
+const setupCanvasObserver = () => {
+  if (canvasResizeObserver) {
+    canvasResizeObserver.disconnect()
+    canvasResizeObserver = null
+  }
+  if (autocratCanvasRef.value && typeof ResizeObserver !== 'undefined') {
+    canvasResizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect && entry.contentRect.width > 0) {
+          autocratCanvasWidth.value = entry.contentRect.width
+        }
+      }
+    })
+    canvasResizeObserver.observe(autocratCanvasRef.value)
+  }
+}
+
 const onCanvasImgLoad = () => {
   if (autocratCanvasRef.value) {
     autocratCanvasWidth.value = autocratCanvasRef.value.clientWidth || 800
   }
+  setupCanvasObserver()
 }
+
 const autocratFontScale = computed(() => {
-  return Math.max(0.2, (autocratCanvasWidth.value || 800) / 1920)
+  return Math.max(0.15, (autocratCanvasWidth.value || 800) / 1920)
 })
 
 const openAutocratModal = async (evt) => {
@@ -672,11 +693,19 @@ const openAutocratModal = async (evt) => {
       responseType: 'blob',
     })
     autocratImageSrc.value = URL.createObjectURL(new Blob([res.data], { type: 'image/png' }))
+    autocratError.value = ''
     nextTick(() => {
       onCanvasImgLoad()
+      setupCanvasObserver()
     })
   } catch (err) {
-    autocratError.value = 'Gagal memuat citra template dari server. Pastikan file template PNG valid telah terunggah.'
+    console.warn('Gagal memuat citra template kustom dari server, beralih ke templat standar:', err)
+    autocratImageSrc.value = '/templates/certificate_template_default.png'
+    autocratError.value = ''
+    nextTick(() => {
+      onCanvasImgLoad()
+      setupCanvasObserver()
+    })
   } finally {
     isLoadingAutocratImage.value = false
   }
@@ -730,7 +759,7 @@ const startTagDrag = (elemKey, e) => {
   activeAutocratElement.value = elemKey
   isDragging.value = true
   draggedElement.value = elemKey
-  e.preventDefault()
+  if (e.cancelable) e.preventDefault()
 
   const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0
   const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0
@@ -743,6 +772,7 @@ const startTagDrag = (elemKey, e) => {
   window.addEventListener('mouseup', endTagDrag)
   window.addEventListener('touchmove', onTagTouchMove, { passive: false })
   window.addEventListener('touchend', endTagDrag)
+  window.addEventListener('touchcancel', endTagDrag)
 }
 
 const onTagDragMove = (e) => {
@@ -753,7 +783,7 @@ const onTagDragMove = (e) => {
 const onTagTouchMove = (e) => {
   if (!isDragging.value || !draggedElement.value || !autocratCanvasRef.value) return
   if (e.touches && e.touches.length > 0) {
-    e.preventDefault()
+    if (e.cancelable) e.preventDefault()
     updatePositionFromPointer(e.touches[0].clientX, e.touches[0].clientY)
   }
 }
@@ -784,12 +814,13 @@ const endTagDrag = () => {
   window.removeEventListener('mouseup', endTagDrag)
   window.removeEventListener('touchmove', onTagTouchMove)
   window.removeEventListener('touchend', endTagDrag)
+  window.removeEventListener('touchcancel', endTagDrag)
 }
 
 // 8 Resize Handles Handler ala Microsoft Word (Perbesar/Perkecil Kotak & Font)
 const startResize = (elemKey, handle, e) => {
   e.stopPropagation()
-  e.preventDefault()
+  if (e.cancelable) e.preventDefault()
   activeAutocratElement.value = elemKey
   isResizing.value = true
   resizingElement.value = elemKey
@@ -802,6 +833,7 @@ const startResize = (elemKey, handle, e) => {
   window.addEventListener('mouseup', endResize)
   window.addEventListener('touchmove', onResizeTouchMove, { passive: false })
   window.addEventListener('touchend', endResize)
+  window.addEventListener('touchcancel', endResize)
 }
 
 const onResizeMove = (e) => {
@@ -812,7 +844,7 @@ const onResizeMove = (e) => {
 const onResizeTouchMove = (e) => {
   if (!isResizing.value || !resizingElement.value) return
   if (e.touches && e.touches.length > 0) {
-    e.preventDefault()
+    if (e.cancelable) e.preventDefault()
     handleResizeCalculation(e.touches[0].clientX, e.touches[0].clientY)
   }
 }
@@ -856,6 +888,7 @@ const endResize = () => {
   window.removeEventListener('mouseup', endResize)
   window.removeEventListener('touchmove', onResizeTouchMove)
   window.removeEventListener('touchend', endResize)
+  window.removeEventListener('touchcancel', endResize)
 }
 
 const handleCanvasClick = (e) => {
@@ -1041,8 +1074,29 @@ const handleSingleGenerate = async () => {
   }
 }
 
+const handleGlobalKeydown = (e) => {
+  if (e.key === 'Escape') {
+    if (showAutocratModal.value) showAutocratModal.value = false
+    if (showEditEventModal.value) showEditEventModal.value = false
+    if (showAddRecipientModal.value) showAddRecipientModal.value = false
+    if (showCsvImportModal.value) showCsvImportModal.value = false
+    if (previewCert.value) closeCertPreview()
+  }
+}
+
 onMounted(() => {
   loadDashboardData()
+  window.addEventListener('resize', onCanvasImgLoad)
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onCanvasImgLoad)
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  if (canvasResizeObserver) {
+    canvasResizeObserver.disconnect()
+    canvasResizeObserver = null
+  }
 })
 </script>
 
@@ -1542,7 +1596,7 @@ onMounted(() => {
                     class="form-input"
                   />
                   <small class="form-hint" style="color: #fdb773;">
-                    💡 <strong>Sistem Autocrat:</strong> Setelah menekan tombol <strong>Simpan Agenda Event</strong> di bawah, editor visual Autocrat akan langsung terbuka otomatis agar Anda dapat menggeser posisi Nama, Nomor Sertifikat, dan Sebagai Apa.
+                    💡 <strong>Sistem Autocrat:</strong> Setelah menekan tombol <strong>Simpan Agenda Event</strong> di bawah, editor visual Autocrat akan langsung terbuka otomatis agar Anda dapat menggeser posisi Nama, Nomor Sertifikat, dan Peran.
                   </small>
                 </div>
 
@@ -1855,13 +1909,14 @@ onMounted(() => {
     </div>
 
     <!-- Modal: Edit Agenda Kegiatan (CRUD Event: Update) -->
-    <div v-if="showEditEventModal" class="modal-backdrop" @click="showEditEventModal = false">
-      <div class="modal-dialog glass-card" @click.stop style="max-width: 550px;">
-        <div class="modal-header">
-          <h3 class="modal-title">Edit Agenda Kegiatan</h3>
-          <button class="close-btn" @click="showEditEventModal = false">&times;</button>
-        </div>
-        <form @submit.prevent="handleUpdateEvent" class="modal-body">
+    <Teleport to="body">
+      <div v-if="showEditEventModal" class="modal-backdrop" @click="showEditEventModal = false">
+        <div class="modal-dialog glass-card" @click.stop style="max-width: 550px;">
+          <div class="modal-header">
+            <h3 class="modal-title">Edit Agenda Kegiatan</h3>
+            <button type="button" class="close-btn" @click="showEditEventModal = false" title="Tutup Modal (Esc)">&times;</button>
+          </div>
+          <form @submit.prevent="handleUpdateEvent" class="modal-body">
           <div class="form-group">
             <label class="form-label">Nama Kegiatan</label>
             <input
@@ -1984,8 +2039,10 @@ onMounted(() => {
         </form>
       </div>
     </div>
+  </Teleport>
 
     <!-- Modal: Atur Posisi Teks Template (Autocrat Google Style) -->
+  <Teleport to="body">
     <div v-if="showAutocratModal" class="modal-backdrop" @click="showAutocratModal = false">
       <div class="modal-dialog glass-card autocrat-modal-dialog" @click.stop>
         <div class="modal-header">
@@ -1995,7 +2052,7 @@ onMounted(() => {
               Geser kotak teks untuk memindahkan posisi, atau tarik titik sudut kotak untuk memperbesar/memperkecil ukuran teks.
             </p>
           </div>
-          <button class="close-btn" @click="showAutocratModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showAutocratModal = false" title="Tutup Modal (Esc)">&times;</button>
         </div>
 
         <div class="modal-body autocrat-modal-body">
@@ -2106,7 +2163,7 @@ onMounted(() => {
                   </template>
                 </div>
 
-                <!-- Element 3: Sebagai / Peran (Variabel "sebagai") -->
+                <!-- Element 3: Peran (Variabel "peran") -->
                 <div
                   v-if="autocratPositions.role && autocratPositions.role.show !== false"
                   class="autocrat-word-box"
@@ -2123,10 +2180,10 @@ onMounted(() => {
                   }"
                   @mousedown="(e) => startTagDrag('role', e)"
                   @touchstart="(e) => startTagDrag('role', e)"
-                  title="Variabel sebagai (Klik untuk geser, tarik sudut kotak untuk ubah ukuran)"
+                  title="Variabel peran (Klik untuk geser, tarik sudut kotak untuk ubah ukuran)"
                 >
                   <span class="autocrat-var-text">
-                    {{ (autocratPositions.role.prefix || '') + 'sebagai' }}
+                    {{ (autocratPositions.role.prefix || '') + 'peran' }}
                   </span>
 
                   <!-- 8 Titik Resize Handle ala Word (Muncul Saat Elemen Aktif) -->
@@ -2175,7 +2232,7 @@ onMounted(() => {
                   :class="{ active: activeAutocratElement === 'role' }"
                   @click="activeAutocratElement = 'role'"
                 >
-                  <span>Sebagai</span>
+                  <span>Peran</span>
                 </button>
                 <button
                   type="button"
@@ -2218,7 +2275,7 @@ onMounted(() => {
                 </div>
 
                 <!-- Font Family & Weight Selection -->
-                <div class="grid-2-col-sm mb-3">
+                <div class="autocrat-grid-2 mb-3">
                   <div>
                     <label class="form-label text-xs mb-1">Jenis Font</label>
                     <select
@@ -2329,7 +2386,7 @@ onMounted(() => {
                 </div>
 
                 <!-- Alignment & Color -->
-                <div class="grid-2-col-sm mb-3">
+                <div class="autocrat-grid-2 mb-3">
                   <div>
                     <label class="form-label text-xs mb-1">Perataan (Align)</label>
                     <div class="align-btn-group">
@@ -2399,13 +2456,15 @@ onMounted(() => {
         </div>
       </div>
     </div>
+  </Teleport>
 
     <!-- Modal F-04: Tambah Calon Penerima Individual -->
+  <Teleport to="body">
     <div v-if="showAddRecipientModal" class="modal-backdrop" @click="showAddRecipientModal = false">
       <div class="modal-dialog glass-card" @click.stop style="max-width: 500px;">
         <div class="modal-header">
           <h3 class="modal-title">Tambah Calon Penerima</h3>
-          <button class="close-btn" @click="showAddRecipientModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showAddRecipientModal = false" title="Tutup Modal (Esc)">&times;</button>
         </div>
         <form @submit.prevent="handleAddRecipient" class="modal-body">
           <div class="form-group">
@@ -2463,13 +2522,15 @@ onMounted(() => {
         </form>
       </div>
     </div>
+  </Teleport>
 
     <!-- Modal F-05: Impor Massal CSV dengan Pratinjau -->
+  <Teleport to="body">
     <div v-if="showCsvImportModal" class="modal-backdrop" @click="showCsvImportModal = false">
       <div class="modal-dialog glass-card" @click.stop style="max-width: 650px;">
         <div class="modal-header">
           <h3 class="modal-title">Impor Massal Penerima CSV</h3>
-          <button class="close-btn" @click="showCsvImportModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showCsvImportModal = false" title="Tutup Modal (Esc)">&times;</button>
         </div>
         <div class="modal-body">
           <p class="pane-sub">Unggah berkas CSV atau tempel teks data penerima (Maks. 500 baris).</p>
@@ -2547,8 +2608,10 @@ onMounted(() => {
         </div>
       </div>
     </div>
+  </Teleport>
 
     <!-- Modal: Pratinjau Citra E-Sertifikat PNG (Lossless LSB Stego) -->
+  <Teleport to="body">
     <div v-if="previewCert" class="modal-backdrop" @click="closeCertPreview">
       <div class="modal-dialog glass-card" @click.stop style="max-width: 860px; max-height: 90vh; overflow-y: auto;">
         <div class="modal-header">
@@ -2559,7 +2622,7 @@ onMounted(() => {
               <p class="modal-sub font-mono text-gold" style="margin: 4px 0 0; font-size: 0.85rem;">{{ previewCert.certificateNumber }}</p>
             </div>
           </div>
-          <button class="close-btn" @click="closeCertPreview">&times;</button>
+          <button type="button" class="close-btn" @click="closeCertPreview" title="Tutup Modal (Esc)">&times;</button>
         </div>
 
         <div class="modal-body">
@@ -2668,6 +2731,7 @@ onMounted(() => {
         </div>
       </div>
     </div>
+  </Teleport>
   </section>
 </template>
 
@@ -3129,13 +3193,15 @@ onMounted(() => {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(10px);
-  z-index: 2000;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px;
+  overflow-y: auto;
 }
 
 .modal-dialog {
@@ -3157,11 +3223,28 @@ onMounted(() => {
 }
 
 .close-btn {
-  background: transparent;
-  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: var(--text-muted);
-  font-size: 1.5rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  line-height: 1;
   cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.close-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #FFFFFF;
+  border-color: rgba(239, 68, 68, 0.5);
+  transform: scale(1.06);
 }
 
 .modal-footer {
@@ -3263,6 +3346,78 @@ onMounted(() => {
   }
   .grid-2-col {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dash-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .user-pill {
+    width: 100%;
+  }
+  .stats-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .event-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .e-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .recipients-top-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .event-picker-box {
+    min-width: unset;
+    width: 100%;
+  }
+  .recipients-actions {
+    width: 100%;
+  }
+  .recipients-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+  .issuance-control-ribbon {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .issuance-left {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+  }
+  .issuance-left .form-select {
+    width: 100% !important;
+  }
+  .issuance-control-ribbon .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .modal-backdrop {
+    padding: 8px;
+    align-items: flex-start;
+  }
+  .modal-dialog {
+    padding: 16px !important;
+    border-radius: var(--radius-md) !important;
+  }
+  .grid-2-col-sm {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 }
 

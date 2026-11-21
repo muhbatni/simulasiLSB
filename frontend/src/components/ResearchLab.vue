@@ -921,4 +921,21 @@ onMounted(() => {
   .formula-grid { grid-template-columns: 1fr; }
   .sandbox-inputs { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 640px) {
+  .sampling-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  .avalanche-sandbox {
+    padding: 16px;
+  }
+  .sandbox-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .diff-bits-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 </style>

@@ -401,7 +401,7 @@ export class CertificateGeneratorService {
         `;
       }
 
-      // 3. Sebagai Apa (Peran)
+      // 3. Peran Partisipasi
       if (cfg.role && cfg.role.show !== false) {
         const roleP = cfg.role;
         const x = (roleP.x / 100) * width;

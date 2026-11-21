@@ -952,4 +952,49 @@ const loadSampleCertificate = async (type = 'valid') => {
   .metadata-table-grid { grid-template-columns: 1fr; }
   .floating-pins-container { display: none; }
 }
+
+@media (max-width: 640px) {
+  .hero-giant-title {
+    font-size: 1.85rem;
+    letter-spacing: -0.5px;
+  }
+  .hero-lead-desc {
+    font-size: 0.92rem;
+  }
+  .hero-pill-actions {
+    flex-direction: column;
+    width: 100%;
+    gap: 10px;
+  }
+  .hero-pill-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .verifier-glass-window {
+    padding: 18px 14px;
+    border-radius: var(--radius-lg);
+  }
+  .verifier-window-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .dropzone-box {
+    padding: 28px 16px;
+  }
+  .outcome-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .quick-download-strip {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .quick-download-strip .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
 </style>

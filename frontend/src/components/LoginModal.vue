@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import {
   Lock,
@@ -25,6 +25,20 @@ const username = ref('admin')
 const password = ref('123')
 const isLoading = ref(false)
 const errorMessage = ref('')
+
+const handleKeydown = (e) => {
+  if (e.key === 'Escape' && props.isOpen) {
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 const handleLogin = async () => {
   if (!username.value.trim()) {
@@ -54,10 +68,11 @@ const quickSelectUser = (u) => {
 </script>
 
 <template>
-  <div v-if="isOpen" class="login-modal-backdrop" @click="emit('close')">
-    <div class="login-modal-box glass-card" @click.stop>
-      <!-- Close Button -->
-      <button class="modal-close-btn" @click="emit('close')">&times;</button>
+  <Teleport to="body">
+    <div v-if="isOpen" class="login-modal-backdrop" @click="emit('close')">
+      <div class="login-modal-box glass-card" @click.stop>
+        <!-- Close Button -->
+        <button type="button" class="modal-close-btn" @click="emit('close')" title="Tutup Modal (Esc)">&times;</button>
 
       <!-- Modal Header (Inspired by ref1.jpg) -->
       <div class="modal-header-visual">
@@ -145,20 +160,21 @@ const quickSelectUser = (u) => {
       </div>
     </div>
   </div>
+</Teleport>
 </template>
 
 <style scoped>
 .login-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.82);
+  background: rgba(0, 0, 0, 0.88);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  z-index: 2000;
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px;
   animation: modalFadeIn 0.25s ease;
 }
 
@@ -180,19 +196,28 @@ const quickSelectUser = (u) => {
 
 .modal-close-btn {
   position: absolute;
-  top: 16px;
-  right: 20px;
-  background: transparent;
-  border: none;
+  top: 14px;
+  right: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: var(--text-muted);
-  font-size: 1.8rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
   line-height: 1;
   cursor: pointer;
   transition: all 0.2s;
+  z-index: 10;
 }
 
 .modal-close-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
   color: #FFFFFF;
+  border-color: rgba(239, 68, 68, 0.5);
 }
 
 .modal-header-visual {

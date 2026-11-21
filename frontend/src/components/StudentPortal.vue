@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '../services/api'
 import { useDialogStore } from '../stores/dialog'
 import {
@@ -121,8 +121,19 @@ watch(
   }
 )
 
+const handleKeydown = (e) => {
+  if (e.key === 'Escape' && selectedPreviewCert.value) {
+    closePreview()
+  }
+}
+
 onMounted(() => {
   loadMyCertificates()
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -255,15 +266,16 @@ onMounted(() => {
     </div>
 
     <!-- Preview & Verification Modal (F-08 Skenario 3 & 4) -->
-    <div v-if="selectedPreviewCert" class="modal-backdrop" @click="closePreview">
-      <div class="modal-dialog glass-card" @click.stop style="max-width: 800px;">
-        <div class="modal-header">
-          <div class="modal-title-group">
-            <Award :size="20" class="text-gold" />
-            <h3 class="modal-title">{{ selectedPreviewCert.recipientName }}</h3>
+    <Teleport to="body">
+      <div v-if="selectedPreviewCert" class="modal-backdrop" @click="closePreview">
+        <div class="modal-dialog glass-card" @click.stop style="max-width: 800px;">
+          <div class="modal-header">
+            <div class="modal-title-group">
+              <Award :size="20" class="text-gold" />
+              <h3 class="modal-title">{{ selectedPreviewCert.recipientName }}</h3>
+            </div>
+            <button type="button" class="close-btn" @click="closePreview" title="Tutup Modal (Esc)">&times;</button>
           </div>
-          <button class="close-btn" @click="closePreview">&times;</button>
-        </div>
 
         <div class="modal-body">
           <!-- Image Preview -->
@@ -343,19 +355,20 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="closePreview">Tutup</button>
-          <button
-            type="button"
-            class="btn btn-primary"
-            @click="downloadCertificate(selectedPreviewCert)"
-          >
-            <Download :size="16" />
-            <span>Unduh Berkas PNG Lossless</span>
-          </button>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="closePreview">Tutup</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              @click="downloadCertificate(selectedPreviewCert)"
+            >
+              <Download :size="16" />
+              <span>Unduh Berkas PNG Lossless</span>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </section>
 </template>
 
@@ -550,13 +563,15 @@ onMounted(() => {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(10px);
-  z-index: 2000;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px;
+  overflow-y: auto;
 }
 
 .modal-dialog {
@@ -586,11 +601,28 @@ onMounted(() => {
 }
 
 .close-btn {
-  background: transparent;
-  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: var(--text-muted);
-  font-size: 1.6rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  line-height: 1;
   cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.close-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #FFFFFF;
+  border-color: rgba(239, 68, 68, 0.5);
+  transform: scale(1.06);
 }
 
 .modal-img-wrap {
@@ -700,6 +732,47 @@ onMounted(() => {
 @media (max-width: 900px) {
   .certs-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .modal-backdrop {
+    padding: 8px;
+    align-items: flex-start;
+  }
+  .modal-dialog {
+    padding: 16px !important;
+    border-radius: var(--radius-md) !important;
+  }
+  .modal-meta-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .modal-meta-grid .m-item {
+    grid-column: span 1 !important;
+  }
+  .vcb-top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .vcb-top .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .modal-footer {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .modal-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .cert-card-footer {
+    flex-direction: column;
+  }
+  .cert-card-footer .btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

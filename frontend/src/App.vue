@@ -139,6 +139,5 @@ onMounted(async () => {
 .main-body {
   flex: 1;
   position: relative;
-  z-index: 1;
 }
 </style>

@@ -57,7 +57,6 @@ export class EventsController {
     return this.eventsService.getEventById(id);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get(':id/template-image')
   async getTemplateImage(@Param('id') id: string, @Res() res: Response) {
     const evt = await this.eventsService.getEventById(id);

@@ -282,8 +282,55 @@ const emit = defineEmits(['change-tab', 'open-login', 'logout'])
   border-color: rgba(239, 68, 68, 0.4);
 }
 
-@media (max-width: 820px) {
+@media (max-width: 860px) {
+  .navbar-container {
+    padding: 10px 0;
+  }
+  .nav-inner {
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: space-between;
+  }
   .floating-pill-nav {
+    display: flex;
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 4px 6px;
+    gap: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .floating-pill-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .pill-nav-item {
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .brand-name {
+    font-size: 1.15rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .floating-pill-nav {
+    justify-content: flex-start;
+  }
+  .pill-nav-item {
+    padding: 5px 10px;
+    font-size: 0.78rem;
+  }
+  .brand-name {
+    font-size: 1.05rem;
+  }
+  .logged-user-pill {
+    padding: 3px 8px 3px 4px;
+  }
+  .user-role-badge {
     display: none;
   }
 }
