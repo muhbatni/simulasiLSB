@@ -294,10 +294,16 @@ export class CertificatesService {
           (event as any).templatePositions,
         );
       } else {
-        coverBuffer = await this.certGenerator.generateCertificateImage(designParams);
+        coverBuffer = await this.certGenerator.generateCertificateImage(
+          designParams,
+          (event as any).templatePositions,
+        );
       }
     } else {
-      coverBuffer = await this.certGenerator.generateCertificateImage(designParams);
+      coverBuffer = await this.certGenerator.generateCertificateImage(
+        designParams,
+        (event as any).templatePositions,
+      );
     }
 
     // Embedding LSB dan Pembangkitan Hash SHA-256 + Canvas Hash

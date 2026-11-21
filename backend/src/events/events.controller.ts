@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { LsbSteganoService } from '../security/lsb-stego.service';
+import { CertificateGeneratorService } from '../certificates/certificate-generator.service';
 import { CreateEventDto, UpdateEventDto, CreateRecipientDto } from './dto/event.dto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,6 +32,7 @@ export class EventsController {
   constructor(
     private readonly eventsService: EventsService,
     private readonly lsbService: LsbSteganoService,
+    private readonly certGenerator: CertificateGeneratorService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -59,17 +61,21 @@ export class EventsController {
   @Get(':id/template-image')
   async getTemplateImage(@Param('id') id: string, @Res() res: Response) {
     const evt = await this.eventsService.getEventById(id);
-    if (!evt.templateImagePath) {
-      throw new NotFoundException('Event ini tidak memiliki template citra');
+    if (evt.templateImagePath) {
+      const templatePath = path.join(process.cwd(), 'uploads', 'covers', evt.templateImagePath);
+      if (fs.existsSync(templatePath)) {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'no-cache');
+        const stream = fs.createReadStream(templatePath);
+        return stream.pipe(res);
+      }
     }
-    const templatePath = path.join(process.cwd(), 'uploads', 'covers', evt.templateImagePath);
-    if (!fs.existsSync(templatePath)) {
-      throw new NotFoundException('Berkas template citra tidak ditemukan di server');
-    }
+
+    // Fallback: Jika event belum memiliki template kustom, sajikan template dasar resmi UIN
+    const baseBuffer = await this.certGenerator.generateCertificateTemplateBase();
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'no-cache');
-    const stream = fs.createReadStream(templatePath);
-    stream.pipe(res);
+    return res.end(baseBuffer);
   }
 
   @UseGuards(JwtAuthGuard)

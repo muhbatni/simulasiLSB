@@ -589,6 +589,8 @@ const defaultPositions = {
     align: 'left',
     prefix: '',
     show: true,
+    fontFamily: "'Segoe UI', Roboto, sans-serif",
+    fontWeight: '600',
   },
   name: {
     x: 50.0,
@@ -598,6 +600,8 @@ const defaultPositions = {
     align: 'center',
     prefix: '',
     show: true,
+    fontFamily: 'Georgia, serif',
+    fontWeight: 'bold',
   },
   role: {
     x: 64.5,
@@ -607,14 +611,40 @@ const defaultPositions = {
     align: 'left',
     prefix: '',
     show: true,
+    fontFamily: "'Segoe UI', Roboto, sans-serif",
+    fontWeight: '600',
   },
 }
 
 const autocratPositions = ref(JSON.parse(JSON.stringify(defaultPositions)))
 
 const autocratCanvasRef = ref(null)
+
+// Word-style Drag to Move State
 const isDragging = ref(false)
 const draggedElement = ref(null)
+let dragStartPointerX = 0
+let dragStartPointerY = 0
+let dragStartPosX = 0
+let dragStartPosY = 0
+
+// Word-style 8-Handle Resize State
+const isResizing = ref(false)
+const resizingElement = ref(null)
+const activeHandle = ref(null)
+let resizeStartX = 0
+let resizeStartY = 0
+let resizeStartFontSize = 32
+
+const autocratCanvasWidth = ref(800)
+const onCanvasImgLoad = () => {
+  if (autocratCanvasRef.value) {
+    autocratCanvasWidth.value = autocratCanvasRef.value.clientWidth || 800
+  }
+}
+const autocratFontScale = computed(() => {
+  return Math.max(0.2, (autocratCanvasWidth.value || 800) / 1920)
+})
 
 const openAutocratModal = async (evt) => {
   if (!evt || !evt.id) return
@@ -642,6 +672,9 @@ const openAutocratModal = async (evt) => {
       responseType: 'blob',
     })
     autocratImageSrc.value = URL.createObjectURL(new Blob([res.data], { type: 'image/png' }))
+    nextTick(() => {
+      onCanvasImgLoad()
+    })
   } catch (err) {
     autocratError.value = 'Gagal memuat citra template dari server. Pastikan file template PNG valid telah terunggah.'
   } finally {
@@ -663,6 +696,8 @@ const applyCenterPreset = () => {
       align: 'center',
       prefix: 'NOMOR: ',
       show: true,
+      fontFamily: "'Courier New', Courier, monospace",
+      fontWeight: '600',
     },
     name: {
       x: 50.0,
@@ -672,6 +707,8 @@ const applyCenterPreset = () => {
       align: 'center',
       prefix: '',
       show: true,
+      fontFamily: 'Georgia, serif',
+      fontWeight: 'bold',
     },
     role: {
       x: 50.0,
@@ -681,15 +718,27 @@ const applyCenterPreset = () => {
       align: 'center',
       prefix: 'Sebagai ',
       show: true,
+      fontFamily: "'Segoe UI', Roboto, sans-serif",
+      fontWeight: '600',
     },
   }
 }
 
+// Relatif & Halus Drag to Move ala Microsoft Word
 const startTagDrag = (elemKey, e) => {
+  if (isResizing.value) return
   activeAutocratElement.value = elemKey
   isDragging.value = true
   draggedElement.value = elemKey
   e.preventDefault()
+
+  const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0
+  const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0
+  dragStartPointerX = clientX
+  dragStartPointerY = clientY
+  dragStartPosX = autocratPositions.value[elemKey]?.x || 50
+  dragStartPosY = autocratPositions.value[elemKey]?.y || 50
+
   window.addEventListener('mousemove', onTagDragMove)
   window.addEventListener('mouseup', endTagDrag)
   window.addEventListener('touchmove', onTagTouchMove, { passive: false })
@@ -698,26 +747,29 @@ const startTagDrag = (elemKey, e) => {
 
 const onTagDragMove = (e) => {
   if (!isDragging.value || !draggedElement.value || !autocratCanvasRef.value) return
-  updatePositionFromCoords(e.clientX, e.clientY)
+  updatePositionFromPointer(e.clientX, e.clientY)
 }
 
 const onTagTouchMove = (e) => {
   if (!isDragging.value || !draggedElement.value || !autocratCanvasRef.value) return
   if (e.touches && e.touches.length > 0) {
     e.preventDefault()
-    updatePositionFromCoords(e.touches[0].clientX, e.touches[0].clientY)
+    updatePositionFromPointer(e.touches[0].clientX, e.touches[0].clientY)
   }
 }
 
-const updatePositionFromCoords = (clientX, clientY) => {
+const updatePositionFromPointer = (clientX, clientY) => {
   const rect = autocratCanvasRef.value.getBoundingClientRect()
   if (rect.width === 0 || rect.height === 0) return
 
-  let x = ((clientX - rect.left) / rect.width) * 100
-  let y = ((clientY - rect.top) / rect.height) * 100
+  const dxPct = ((clientX - dragStartPointerX) / rect.width) * 100
+  const dyPct = ((clientY - dragStartPointerY) / rect.height) * 100
 
-  x = Math.max(0, Math.min(100, Math.round(x * 10) / 10))
-  y = Math.max(0, Math.min(100, Math.round(y * 10) / 10))
+  let x = Math.round((dragStartPosX + dxPct) * 10) / 10
+  let y = Math.round((dragStartPosY + dyPct) * 10) / 10
+
+  x = Math.max(0, Math.min(100, x))
+  y = Math.max(0, Math.min(100, y))
 
   if (autocratPositions.value[draggedElement.value]) {
     autocratPositions.value[draggedElement.value].x = x
@@ -734,9 +786,81 @@ const endTagDrag = () => {
   window.removeEventListener('touchend', endTagDrag)
 }
 
+// 8 Resize Handles Handler ala Microsoft Word (Perbesar/Perkecil Kotak & Font)
+const startResize = (elemKey, handle, e) => {
+  e.stopPropagation()
+  e.preventDefault()
+  activeAutocratElement.value = elemKey
+  isResizing.value = true
+  resizingElement.value = elemKey
+  activeHandle.value = handle
+  resizeStartX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0
+  resizeStartY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0
+  resizeStartFontSize = autocratPositions.value[elemKey]?.fontSize || 32
+
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', endResize)
+  window.addEventListener('touchmove', onResizeTouchMove, { passive: false })
+  window.addEventListener('touchend', endResize)
+}
+
+const onResizeMove = (e) => {
+  if (!isResizing.value || !resizingElement.value) return
+  handleResizeCalculation(e.clientX, e.clientY)
+}
+
+const onResizeTouchMove = (e) => {
+  if (!isResizing.value || !resizingElement.value) return
+  if (e.touches && e.touches.length > 0) {
+    e.preventDefault()
+    handleResizeCalculation(e.touches[0].clientX, e.touches[0].clientY)
+  }
+}
+
+const handleResizeCalculation = (clientX, clientY) => {
+  const dx = clientX - resizeStartX
+  const dy = clientY - resizeStartY
+  let delta = 0
+  const h = activeHandle.value
+
+  if (h === 'br') {
+    delta = (dx + dy) / 2
+  } else if (h === 'tl') {
+    delta = (-dx - dy) / 2
+  } else if (h === 'tr') {
+    delta = (dx - dy) / 2
+  } else if (h === 'bl') {
+    delta = (-dx + dy) / 2
+  } else if (h === 'mr') {
+    delta = dx
+  } else if (h === 'ml') {
+    delta = -dx
+  } else if (h === 'bc') {
+    delta = dy
+  } else if (h === 'tc') {
+    delta = -dy
+  }
+
+  // Sensitivitas resize (0.35 px font per px mouse movement)
+  const newSize = Math.max(10, Math.min(120, Math.round(resizeStartFontSize + delta * 0.35)))
+  if (autocratPositions.value[resizingElement.value]) {
+    autocratPositions.value[resizingElement.value].fontSize = newSize
+  }
+}
+
+const endResize = () => {
+  isResizing.value = false
+  resizingElement.value = null
+  activeHandle.value = null
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', endResize)
+  window.removeEventListener('touchmove', onResizeTouchMove)
+  window.removeEventListener('touchend', endResize)
+}
+
 const handleCanvasClick = (e) => {
-  if (isDragging.value || !activeAutocratElement.value || !autocratCanvasRef.value) return
-  if (e.target.closest('.autocrat-tag')) return
+  if (isDragging.value || isResizing.value || !activeAutocratElement.value || !autocratCanvasRef.value) return
+  if (e.target.closest('.autocrat-word-box') || e.target.closest('.autocrat-handle')) return
 
   const rect = autocratCanvasRef.value.getBoundingClientRect()
   let x = ((e.clientX - rect.left) / rect.width) * 100
@@ -1865,29 +1989,22 @@ onMounted(() => {
     <div v-if="showAutocratModal" class="modal-backdrop" @click="showAutocratModal = false">
       <div class="modal-dialog glass-card autocrat-modal-dialog" @click.stop>
         <div class="modal-header">
-          <div class="d-flex align-center gap-2">
-            <div class="badge-icon-box">
-              <Layers :size="20" style="color: #fdb773;" />
-            </div>
-            <div>
-              <h3 class="modal-title">Atur Posisi Citra Template (Autocrat)</h3>
-              <p class="modal-sub">
-                Geser (drag) kotak teks langsung di atas gambar template atau atur koordinat presisi.
-              </p>
-            </div>
+          <div>
+            <h3 class="modal-title">Atur Posisi Citra Template (Autocrat)</h3>
+            <p class="modal-sub">
+              Geser kotak teks untuk memindahkan posisi, atau tarik titik sudut kotak untuk memperbesar/memperkecil ukuran teks.
+            </p>
           </div>
           <button class="close-btn" @click="showAutocratModal = false">&times;</button>
         </div>
 
         <div class="modal-body autocrat-modal-body">
           <div v-if="autocratError" class="login-error-alert mb-3">
-            <AlertTriangle :size="16" />
             <span>{{ autocratError }}</span>
           </div>
 
           <!-- Loading State -->
           <div v-if="isLoadingAutocratImage" class="autocrat-loading-box">
-            <RefreshCw :size="28" class="spin-icon text-brand" />
             <p>Memuat citra template sertifikat...</p>
           </div>
 
@@ -1897,7 +2014,7 @@ onMounted(() => {
             <div class="autocrat-canvas-col">
               <div class="autocrat-canvas-header">
                 <span class="canvas-title">Pratinjau Visual Template Sertifikat</span>
-                <span class="canvas-hint">💡 Geser kotak teks langsung pada gambar</span>
+                <span class="canvas-hint">Geser kotak langsung pada gambar, atau tarik sudut kotak untuk mengubah ukuran</span>
               </div>
 
               <div
@@ -1911,81 +2028,118 @@ onMounted(() => {
                   :src="autocratImageSrc"
                   alt="Template Sertifikat"
                   class="autocrat-canvas-img"
+                  @load="onCanvasImgLoad"
                 />
                 <div v-else class="autocrat-no-img">
                   <span>Tidak ada citra template. Silakan unggah terlebih dahulu di form event.</span>
                 </div>
 
-                <!-- Element 1: Nomor Sertifikat -->
+                <!-- Element 1: Nomor Sertifikat (Variabel "nomor") -->
                 <div
                   v-if="autocratPositions.number && autocratPositions.number.show !== false"
-                  class="autocrat-tag"
+                  class="autocrat-word-box"
                   :class="{ active: activeAutocratElement === 'number' }"
                   :style="{
                     left: autocratPositions.number.x + '%',
                     top: autocratPositions.number.y + '%',
                     color: autocratPositions.number.color || '#333333',
-                    fontSize: Math.max(9, (autocratPositions.number.fontSize || 16) * 0.45) + 'px',
+                    fontSize: Math.max(9, Math.round((autocratPositions.number.fontSize || 16) * autocratFontScale)) + 'px',
+                    fontFamily: autocratPositions.number.fontFamily || '\'Segoe UI\', Roboto, sans-serif',
+                    fontWeight: autocratPositions.number.fontWeight || '600',
                     textAlign: autocratPositions.number.align || 'left',
                     transform: autocratPositions.number.align === 'left' ? 'translate(0, -50%)' : autocratPositions.number.align === 'right' ? 'translate(-100%, -50%)' : 'translate(-50%, -50%)'
                   }"
                   @mousedown="(e) => startTagDrag('number', e)"
                   @touchstart="(e) => startTagDrag('number', e)"
-                  title="Nomor Sertifikat (Klik & Geser)"
+                  title="Variabel nomor (Klik untuk geser, tarik sudut kotak untuk ubah ukuran)"
                 >
-                  <span class="autocrat-tag-pill">🏷️ NOMOR SERTI</span>
-                  <div class="autocrat-tag-text font-mono">
-                    {{ (autocratPositions.number.prefix || '') + (autocratEvent?.nextCertificateNumber || (autocratEvent?.certificatePrefix ? autocratEvent.certificatePrefix + '001' : '041/HIMAPROSIF/XI/2026/001')) }}
-                  </div>
+                  <span class="autocrat-var-text font-mono">
+                    {{ (autocratPositions.number.prefix || '') + 'nomor' }}
+                  </span>
+
+                  <!-- 8 Titik Resize Handle ala Word (Muncul Saat Elemen Aktif) -->
+                  <template v-if="activeAutocratElement === 'number'">
+                    <div class="autocrat-handle handle-tl" @mousedown.stop="(e) => startResize('number', 'tl', e)" @touchstart.stop="(e) => startResize('number', 'tl', e)"></div>
+                    <div class="autocrat-handle handle-tc" @mousedown.stop="(e) => startResize('number', 'tc', e)" @touchstart.stop="(e) => startResize('number', 'tc', e)"></div>
+                    <div class="autocrat-handle handle-tr" @mousedown.stop="(e) => startResize('number', 'tr', e)" @touchstart.stop="(e) => startResize('number', 'tr', e)"></div>
+                    <div class="autocrat-handle handle-mr" @mousedown.stop="(e) => startResize('number', 'mr', e)" @touchstart.stop="(e) => startResize('number', 'mr', e)"></div>
+                    <div class="autocrat-handle handle-br" @mousedown.stop="(e) => startResize('number', 'br', e)" @touchstart.stop="(e) => startResize('number', 'br', e)"></div>
+                    <div class="autocrat-handle handle-bc" @mousedown.stop="(e) => startResize('number', 'bc', e)" @touchstart.stop="(e) => startResize('number', 'bc', e)"></div>
+                    <div class="autocrat-handle handle-bl" @mousedown.stop="(e) => startResize('number', 'bl', e)" @touchstart.stop="(e) => startResize('number', 'bl', e)"></div>
+                    <div class="autocrat-handle handle-ml" @mousedown.stop="(e) => startResize('number', 'ml', e)" @touchstart.stop="(e) => startResize('number', 'ml', e)"></div>
+                  </template>
                 </div>
 
-                <!-- Element 2: Nama Peserta -->
+                <!-- Element 2: Nama Peserta (Variabel "nama") -->
                 <div
                   v-if="autocratPositions.name && autocratPositions.name.show !== false"
-                  class="autocrat-tag"
+                  class="autocrat-word-box"
                   :class="{ active: activeAutocratElement === 'name' }"
                   :style="{
                     left: autocratPositions.name.x + '%',
                     top: autocratPositions.name.y + '%',
                     color: autocratPositions.name.color || '#A14646',
-                    fontSize: Math.max(12, (autocratPositions.name.fontSize || 46) * 0.45) + 'px',
-                    fontFamily: 'Georgia, serif',
-                    fontWeight: 'bold',
+                    fontSize: Math.max(12, Math.round((autocratPositions.name.fontSize || 46) * autocratFontScale)) + 'px',
+                    fontFamily: autocratPositions.name.fontFamily || 'Georgia, serif',
+                    fontWeight: autocratPositions.name.fontWeight || 'bold',
                     textAlign: autocratPositions.name.align || 'center',
                     transform: autocratPositions.name.align === 'left' ? 'translate(0, -50%)' : autocratPositions.name.align === 'right' ? 'translate(-100%, -50%)' : 'translate(-50%, -50%)'
                   }"
                   @mousedown="(e) => startTagDrag('name', e)"
                   @touchstart="(e) => startTagDrag('name', e)"
-                  title="Nama Peserta (Klik & Geser)"
+                  title="Variabel nama (Klik untuk geser, tarik sudut kotak untuk ubah ukuran)"
                 >
-                  <span class="autocrat-tag-pill">👤 NAMA PESERTA</span>
-                  <div class="autocrat-tag-text">
-                    {{ (autocratPositions.name.prefix || '') + 'Muhammad Raihan' }}
-                  </div>
+                  <span class="autocrat-var-text">
+                    {{ (autocratPositions.name.prefix || '') + 'nama' }}
+                  </span>
+
+                  <!-- 8 Titik Resize Handle ala Word (Muncul Saat Elemen Aktif) -->
+                  <template v-if="activeAutocratElement === 'name'">
+                    <div class="autocrat-handle handle-tl" @mousedown.stop="(e) => startResize('name', 'tl', e)" @touchstart.stop="(e) => startResize('name', 'tl', e)"></div>
+                    <div class="autocrat-handle handle-tc" @mousedown.stop="(e) => startResize('name', 'tc', e)" @touchstart.stop="(e) => startResize('name', 'tc', e)"></div>
+                    <div class="autocrat-handle handle-tr" @mousedown.stop="(e) => startResize('name', 'tr', e)" @touchstart.stop="(e) => startResize('name', 'tr', e)"></div>
+                    <div class="autocrat-handle handle-mr" @mousedown.stop="(e) => startResize('name', 'mr', e)" @touchstart.stop="(e) => startResize('name', 'mr', e)"></div>
+                    <div class="autocrat-handle handle-br" @mousedown.stop="(e) => startResize('name', 'br', e)" @touchstart.stop="(e) => startResize('name', 'br', e)"></div>
+                    <div class="autocrat-handle handle-bc" @mousedown.stop="(e) => startResize('name', 'bc', e)" @touchstart.stop="(e) => startResize('name', 'bc', e)"></div>
+                    <div class="autocrat-handle handle-bl" @mousedown.stop="(e) => startResize('name', 'bl', e)" @touchstart.stop="(e) => startResize('name', 'bl', e)"></div>
+                    <div class="autocrat-handle handle-ml" @mousedown.stop="(e) => startResize('name', 'ml', e)" @touchstart.stop="(e) => startResize('name', 'ml', e)"></div>
+                  </template>
                 </div>
 
-                <!-- Element 3: Sebagai Apa / Peran -->
+                <!-- Element 3: Sebagai / Peran (Variabel "sebagai") -->
                 <div
                   v-if="autocratPositions.role && autocratPositions.role.show !== false"
-                  class="autocrat-tag"
+                  class="autocrat-word-box"
                   :class="{ active: activeAutocratElement === 'role' }"
                   :style="{
                     left: autocratPositions.role.x + '%',
                     top: autocratPositions.role.y + '%',
                     color: autocratPositions.role.color || '#DA6556',
-                    fontSize: Math.max(10, (autocratPositions.role.fontSize || 20) * 0.45) + 'px',
-                    fontWeight: '600',
+                    fontSize: Math.max(10, Math.round((autocratPositions.role.fontSize || 20) * autocratFontScale)) + 'px',
+                    fontFamily: autocratPositions.role.fontFamily || '\'Segoe UI\', Roboto, sans-serif',
+                    fontWeight: autocratPositions.role.fontWeight || '600',
                     textAlign: autocratPositions.role.align || 'left',
                     transform: autocratPositions.role.align === 'left' ? 'translate(0, -50%)' : autocratPositions.role.align === 'right' ? 'translate(-100%, -50%)' : 'translate(-50%, -50%)'
                   }"
                   @mousedown="(e) => startTagDrag('role', e)"
                   @touchstart="(e) => startTagDrag('role', e)"
-                  title="Sebagai Apa / Peran (Klik & Geser)"
+                  title="Variabel sebagai (Klik untuk geser, tarik sudut kotak untuk ubah ukuran)"
                 >
-                  <span class="autocrat-tag-pill">🎖️ SEBAGAI APA</span>
-                  <div class="autocrat-tag-text">
-                    {{ (autocratPositions.role.prefix || '') + 'Peserta' }}
-                  </div>
+                  <span class="autocrat-var-text">
+                    {{ (autocratPositions.role.prefix || '') + 'sebagai' }}
+                  </span>
+
+                  <!-- 8 Titik Resize Handle ala Word (Muncul Saat Elemen Aktif) -->
+                  <template v-if="activeAutocratElement === 'role'">
+                    <div class="autocrat-handle handle-tl" @mousedown.stop="(e) => startResize('role', 'tl', e)" @touchstart.stop="(e) => startResize('role', 'tl', e)"></div>
+                    <div class="autocrat-handle handle-tc" @mousedown.stop="(e) => startResize('role', 'tc', e)" @touchstart.stop="(e) => startResize('role', 'tc', e)"></div>
+                    <div class="autocrat-handle handle-tr" @mousedown.stop="(e) => startResize('role', 'tr', e)" @touchstart.stop="(e) => startResize('role', 'tr', e)"></div>
+                    <div class="autocrat-handle handle-mr" @mousedown.stop="(e) => startResize('role', 'mr', e)" @touchstart.stop="(e) => startResize('role', 'mr', e)"></div>
+                    <div class="autocrat-handle handle-br" @mousedown.stop="(e) => startResize('role', 'br', e)" @touchstart.stop="(e) => startResize('role', 'br', e)"></div>
+                    <div class="autocrat-handle handle-bc" @mousedown.stop="(e) => startResize('role', 'bc', e)" @touchstart.stop="(e) => startResize('role', 'bc', e)"></div>
+                    <div class="autocrat-handle handle-bl" @mousedown.stop="(e) => startResize('role', 'bl', e)" @touchstart.stop="(e) => startResize('role', 'bl', e)"></div>
+                    <div class="autocrat-handle handle-ml" @mousedown.stop="(e) => startResize('role', 'ml', e)" @touchstart.stop="(e) => startResize('role', 'ml', e)"></div>
+                  </template>
                 </div>
               </div>
 
@@ -1993,10 +2147,10 @@ onMounted(() => {
               <div class="autocrat-presets-bar">
                 <span class="preset-label">Preset Tata Letak:</span>
                 <button type="button" class="btn btn-secondary btn-xs" @click="applyUinPreset">
-                  <span>✨ Rekomendasi UIN / HIMA</span>
+                  <span>Rekomendasi UIN / HIMA</span>
                 </button>
                 <button type="button" class="btn btn-secondary btn-xs" @click="applyCenterPreset">
-                  <span>🎯 Simetris Rata Tengah</span>
+                  <span>Simetris Rata Tengah</span>
                 </button>
               </div>
             </div>
@@ -2013,7 +2167,7 @@ onMounted(() => {
                   :class="{ active: activeAutocratElement === 'name' }"
                   @click="activeAutocratElement = 'name'"
                 >
-                  <span>👤 Nama</span>
+                  <span>Nama</span>
                 </button>
                 <button
                   type="button"
@@ -2021,7 +2175,7 @@ onMounted(() => {
                   :class="{ active: activeAutocratElement === 'role' }"
                   @click="activeAutocratElement = 'role'"
                 >
-                  <span>🎖️ Sebagai</span>
+                  <span>Sebagai</span>
                 </button>
                 <button
                   type="button"
@@ -2029,7 +2183,7 @@ onMounted(() => {
                   :class="{ active: activeAutocratElement === 'number' }"
                   @click="activeAutocratElement = 'number'"
                 >
-                  <span>🏷️ Nomor</span>
+                  <span>Nomor</span>
                 </button>
               </div>
 
@@ -2061,6 +2215,39 @@ onMounted(() => {
                     class="form-input form-input-sm"
                     :placeholder="activeAutocratElement === 'number' ? 'NOMOR: ' : activeAutocratElement === 'role' ? 'Sebagai ' : ''"
                   />
+                </div>
+
+                <!-- Font Family & Weight Selection -->
+                <div class="grid-2-col-sm mb-3">
+                  <div>
+                    <label class="form-label text-xs mb-1">Jenis Font</label>
+                    <select
+                      v-model="autocratPositions[activeAutocratElement].fontFamily"
+                      class="form-select form-select-sm"
+                    >
+                      <option value="Georgia, serif">Georgia</option>
+                      <option value="'Times New Roman', Times, serif">Times New Roman</option>
+                      <option value="'Playfair Display', Georgia, serif">Playfair Display</option>
+                      <option value="'Cinzel', 'Times New Roman', serif">Cinzel</option>
+                      <option value="'Great Vibes', cursive">Great Vibes</option>
+                      <option value="Arial, sans-serif">Arial</option>
+                      <option value="'Segoe UI', Roboto, sans-serif">Segoe UI</option>
+                      <option value="'Montserrat', 'Segoe UI', sans-serif">Montserrat</option>
+                      <option value="'Courier New', Courier, monospace">Courier New</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label text-xs mb-1">Ketebalan Font</label>
+                    <select
+                      v-model="autocratPositions[activeAutocratElement].fontWeight"
+                      class="form-select form-select-sm"
+                    >
+                      <option value="normal">Normal</option>
+                      <option value="600">Semi Bold</option>
+                      <option value="bold">Bold</option>
+                      <option value="800">Extra Bold</option>
+                    </select>
+                  </div>
                 </div>
 
                 <!-- Position X (%) -->
@@ -2125,7 +2312,7 @@ onMounted(() => {
                     <input
                       type="range"
                       min="10"
-                      max="80"
+                      max="120"
                       step="1"
                       v-model.number="autocratPositions[activeAutocratElement].fontSize"
                       class="range-slider flex-1"
@@ -2133,7 +2320,7 @@ onMounted(() => {
                     <input
                       type="number"
                       min="10"
-                      max="80"
+                      max="120"
                       step="1"
                       v-model.number="autocratPositions[activeAutocratElement].fontSize"
                       class="form-input form-input-sm font-mono num-box"
@@ -2153,7 +2340,7 @@ onMounted(() => {
                         @click="autocratPositions[activeAutocratElement].align = 'left'"
                         title="Rata Kiri"
                       >
-                        <AlignLeft :size="14" />
+                        <span>Kiri</span>
                       </button>
                       <button
                         type="button"
@@ -2162,7 +2349,7 @@ onMounted(() => {
                         @click="autocratPositions[activeAutocratElement].align = 'center'"
                         title="Rata Tengah"
                       >
-                        <AlignCenter :size="14" />
+                        <span>Tengah</span>
                       </button>
                       <button
                         type="button"
@@ -2171,7 +2358,7 @@ onMounted(() => {
                         @click="autocratPositions[activeAutocratElement].align = 'right'"
                         title="Rata Kanan"
                       >
-                        <AlignRight :size="14" />
+                        <span>Kanan</span>
                       </button>
                     </div>
                   </div>
@@ -2207,8 +2394,6 @@ onMounted(() => {
             :disabled="isSavingAutocrat"
             @click="handleSaveAutocratPositions"
           >
-            <RefreshCw v-if="isSavingAutocrat" :size="16" class="spin-icon" />
-            <CheckCircle2 v-else :size="16" />
             <span>{{ isSavingAutocrat ? 'Menyimpan Posisi...' : 'Simpan Posisi Template' }}</span>
           </button>
         </div>
