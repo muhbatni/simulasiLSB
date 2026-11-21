@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import api from '../services/api'
 import { useAuthStore } from '../stores/auth'
+import { useDialogStore } from '../stores/dialog'
 import { VueDatePicker } from '@vuepic/vue-datepicker'
 import '@vuepic/vue-datepicker/dist/main.css'
 import {
@@ -39,6 +40,7 @@ const props = defineProps({
 const emit = defineEmits(['login-success'])
 
 const authStore = useAuthStore()
+const dialog = useDialogStore()
 
 const activeSubTab = ref('events') // 'events' (ujung kiri) | 'recipients' | 'generator' | 'issued' | 'logs'
 const events = ref([])
@@ -164,7 +166,7 @@ const handleDownloadCertificate = async (certId, recipientName, certNumber) => {
     link.click()
     URL.revokeObjectURL(link.href)
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal mengunduh sertifikat')
+    dialog.error(err.response?.data?.message || 'Gagal mengunduh sertifikat')
   }
 }
 
@@ -302,7 +304,7 @@ const handleExecuteCsvImport = async () => {
     csvPreviewData.value = null
     csvFile.value = null
     await loadRecipients(selectedEventId.value)
-    alert('Impor massal penerima berhasil disimpan dengan status Belum Terbit!')
+    dialog.success('Impor massal penerima berhasil disimpan dengan status Belum Terbit!')
   } catch (err) {
     csvImportError.value = err.response?.data?.message || 'Gagal mengimpor data CSV'
   } finally {
@@ -339,7 +341,7 @@ const handleIssueSelected = async () => {
     await loadRecipients(selectedEventId.value)
     await loadDashboardData()
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal menerbitkan sertifikat')
+    dialog.error(err.response?.data?.message || 'Gagal menerbitkan sertifikat')
   } finally {
     isIssuing.value = false
   }
@@ -356,7 +358,7 @@ const toggleSelectAllIssued = () => {
 
 const handleDownloadZip = async () => {
   if (selectedIssuedCertIds.value.length === 0) {
-    alert('Pilih minimal satu sertifikat untuk diunduh sebagai ZIP')
+    dialog.warning('Pilih minimal satu sertifikat untuk diunduh sebagai ZIP')
     return
   }
   isDownloadingZip.value = true
@@ -375,7 +377,7 @@ const handleDownloadZip = async () => {
     link.click()
     URL.revokeObjectURL(link.href)
   } catch (err) {
-    alert('Gagal mengunduh ZIP sertifikat')
+    dialog.error('Gagal mengunduh ZIP sertifikat')
   } finally {
     isDownloadingZip.value = false
   }
@@ -387,7 +389,7 @@ const handleCreateEvent = async () => {
 
   const prefix = (newEventForm.value.certificatePrefix || '').trim()
   if (!prefix.endsWith('/')) {
-    alert("Format nomor sertifikat ditolak! Harus diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)")
+    dialog.warning("Format nomor sertifikat ditolak! Harus diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)")
     return
   }
 
@@ -418,9 +420,9 @@ const handleCreateEvent = async () => {
     newEventForm.value.certificatePrefix = '041/HIMAPROSIF/XI/2026/'
     newEventTemplate.value = null
     await loadDashboardData()
-    alert('Agenda kegiatan berhasil ditambahkan!')
+    dialog.success('Agenda kegiatan berhasil ditambahkan!')
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal membuat event')
+    dialog.error(err.response?.data?.message || 'Gagal membuat event')
   } finally {
     isCreatingEvent.value = false
   }
@@ -491,7 +493,7 @@ const handleUpdateEvent = async () => {
 
     showEditEventModal.value = false
     await loadDashboardData()
-    alert('Agenda kegiatan berhasil diperbarui!')
+    dialog.success('Agenda kegiatan berhasil diperbarui!')
   } catch (err) {
     editEventError.value = err.response?.data?.message || 'Gagal memperbarui agenda kegiatan'
   } finally {
@@ -500,8 +502,16 @@ const handleUpdateEvent = async () => {
 }
 
 const handleDeleteEvent = async (event) => {
-  const confirmMsg = `Yakin ingin menghapus agenda '${event.eventName}'? Seluruh data sertifikat dan penerima terkait akan ikut terhapus.`
-  if (!confirm(confirmMsg)) return
+  const confirmed = await dialog.confirm(
+    `Yakin ingin menghapus agenda '${event.eventName}'? Seluruh data sertifikat dan penerima terkait akan ikut terhapus.`,
+    {
+      title: 'Hapus Agenda Kegiatan',
+      confirmText: 'Ya, Hapus',
+      cancelText: 'Batal',
+      isDanger: true,
+    }
+  )
+  if (!confirmed) return
 
   try {
     await api.delete(`/events/${event.id}`)
@@ -509,9 +519,9 @@ const handleDeleteEvent = async (event) => {
       selectedEventId.value = ''
     }
     await loadDashboardData()
-    alert('Agenda berhasil dihapus.')
+    dialog.success('Agenda berhasil dihapus.')
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal menghapus event.')
+    dialog.error(err.response?.data?.message || 'Gagal menghapus event.')
   }
 }
 
@@ -544,7 +554,7 @@ const handleExportLogsCsv = async () => {
     link.click()
     URL.revokeObjectURL(link.href)
   } catch (err) {
-    alert('Gagal mengekspor CSV riwayat verifikasi')
+    dialog.error('Gagal mengekspor CSV riwayat verifikasi')
   }
 }
 

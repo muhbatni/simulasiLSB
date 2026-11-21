@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import api from '../services/api'
+import { useDialogStore } from '../stores/dialog'
 import {
   Search,
   Download,
@@ -25,6 +26,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['open-login'])
+const dialog = useDialogStore()
 
 const searchQuery = ref(props.initialQuery || '')
 const certificates = ref([])
@@ -94,7 +96,7 @@ const downloadCertificate = async (cert) => {
     link.remove()
     window.URL.revokeObjectURL(url)
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal mengunduh berkas sertifikat')
+    dialog.error(err.response?.data?.message || 'Gagal mengunduh berkas sertifikat')
   }
 }
 
@@ -106,7 +108,7 @@ const verifyStoredCertificate = async (certId) => {
     const res = await api.post(`/me/certificates/${certId}/verify`, {})
     storedVerificationResult.value = res.data
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal memverifikasi berkas sertifikat di peladen')
+    dialog.error(err.response?.data?.message || 'Gagal memverifikasi berkas sertifikat di peladen')
   } finally {
     isVerifyingStored.value = false
   }

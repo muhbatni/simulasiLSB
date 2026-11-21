@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '../services/api'
+import { useDialogStore } from '../stores/dialog'
 import {
   Terminal,
   Play,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 
 const activeLabTab = ref('blackbox') // 'blackbox' | 'sampling' | 'imperceptibility' | 'tamper'
+const dialog = useDialogStore()
 
 // Black-Box State
 const isRunningBlackBox = ref(false)
@@ -92,7 +94,7 @@ const handleExportMetricsCsv = async (count = 50) => {
     link.click()
     URL.revokeObjectURL(link.href)
   } catch (err) {
-    alert('Gagal mengekspor CSV metrik hasil uji. Pastikan Anda telah login sebagai admin.')
+    dialog.error('Gagal mengekspor CSV metrik hasil uji. Pastikan Anda telah login sebagai admin.')
   } finally {
     isExportingMetrics.value = false
   }

@@ -9,8 +9,11 @@ import AdminStudio from './components/AdminStudio.vue'
 import ResearchLab from './components/ResearchLab.vue'
 import Footer from './components/Footer.vue'
 import LoginModal from './components/LoginModal.vue'
+import AppDialog from './components/AppDialog.vue'
+import { useDialogStore } from './stores/dialog'
 
 const authStore = useAuthStore()
+const dialogStore = useDialogStore()
 const activeTab = ref('verify') // 'verify' | 'student' | 'admin' | 'lab'
 const isLoginModalOpen = ref(false)
 
@@ -44,6 +47,11 @@ const handleLogout = () => {
 }
 
 onMounted(async () => {
+  // Override native browser alert agar seluruh notifikasi menggunakan pop-up kustom tanpa "localhost"
+  window.alert = (msg) => {
+    dialogStore.alert(String(msg || ''))
+  }
+
   await authStore.fetchProfile()
   window.addEventListener('auth:expired', () => {
     authStore.logout()
@@ -110,6 +118,9 @@ onMounted(async () => {
       @close="closeLoginModal"
       @login-success="handleLoginSuccess"
     />
+
+    <!-- Global Custom Dialog / Pop-up (No native localhost alert) -->
+    <AppDialog />
 
     <!-- Footer with Academic & Author Credentials -->
     <Footer />
