@@ -1024,8 +1024,10 @@ onMounted(() => {
           </button>
         </div>
 
-        <!-- TAB 1: Recipients & Issuance (F-04, F-05, F-06) -->
-        <div v-if="activeSubTab === 'recipients'" class="tab-pane">
+        <!-- Smooth Transition Wrapper for Studio Tabs -->
+        <Transition name="tab-fade" mode="out-in">
+          <!-- TAB 1: Recipients & Issuance (F-04, F-05, F-06) -->
+          <div v-if="activeSubTab === 'recipients'" key="recipients" class="tab-pane">
           <div class="glass-card pane-card">
             <!-- Event Selector & Action Bar -->
             <div class="recipients-top-bar">
@@ -1157,7 +1159,7 @@ onMounted(() => {
         </div>
 
         <!-- TAB 2: Issued Certs & Lossless ZIP Export (F-07) -->
-        <div v-if="activeSubTab === 'issued'" class="tab-pane">
+        <div v-else-if="activeSubTab === 'issued'" key="issued" class="tab-pane">
           <div class="glass-card pane-card">
             <!-- Warning Banner from Spec F-07 -->
             <div class="lossless-warning-banner">
@@ -1240,7 +1242,7 @@ onMounted(() => {
         </div>
 
         <!-- TAB 3: Event Management (F-03) -->
-        <div v-if="activeSubTab === 'events'" class="tab-pane">
+        <div v-else-if="activeSubTab === 'events'" key="events" class="tab-pane">
           <div class="grid-2-col">
             <!-- Create Event Form -->
             <div class="glass-card pane-card">
@@ -1408,7 +1410,7 @@ onMounted(() => {
         </div>
 
         <!-- TAB 4: Instant Generator (Single) -->
-        <div v-if="activeSubTab === 'generator'" class="tab-pane">
+        <div v-else-if="activeSubTab === 'generator'" key="generator" class="tab-pane">
           <div class="grid-2-col">
             <div class="glass-card pane-card">
               <h3 class="pane-title">Penerbitan E-Sertifikat Cepat (Tunggal)</h3>
@@ -1554,7 +1556,7 @@ onMounted(() => {
         </div>
 
         <!-- TAB 5: Verification Audit Logs (F-11) -->
-        <div v-if="activeSubTab === 'logs'" class="tab-pane">
+        <div v-else-if="activeSubTab === 'logs'" key="logs" class="tab-pane">
           <div class="glass-card pane-card">
             <!-- Filter & Action Bar -->
             <div class="logs-filter-bar">
@@ -1630,6 +1632,7 @@ onMounted(() => {
             </div>
           </div>
         </div>
+        </Transition>
       </div>
     </div>
 
@@ -2438,38 +2441,77 @@ onMounted(() => {
 /* Studio Tabs */
 .studio-tabs {
   display: flex;
-  gap: 6px;
-  padding: 6px;
+  gap: 8px;
+  padding: 8px;
   margin-bottom: 24px;
   overflow-x: auto;
+  border-radius: var(--radius-pill);
+  scrollbar-width: none;
+}
+
+.studio-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .s-tab-btn {
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 0.86rem;
+  font-size: 0.88rem;
   font-weight: 600;
-  padding: 8px 16px;
+  padding: 10px 18px;
   border-radius: var(--radius-pill);
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  user-select: none;
 }
 
 .s-tab-btn:hover {
   color: #FFFFFF;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.s-tab-btn:active {
+  transform: translateY(0) scale(0.96);
 }
 
 .s-tab-btn.active {
-  background: rgba(235, 137, 91, 0.2);
-  color: var(--c-fd);
-  border: 1px solid rgba(235, 137, 91, 0.4);
+  background: linear-gradient(135deg, rgba(235, 137, 91, 0.28), rgba(218, 101, 86, 0.32));
+  color: #FFFFFF;
+  border: 1px solid rgba(253, 183, 115, 0.5);
+  box-shadow: 0 4px 16px rgba(218, 101, 86, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+}
+
+/* Smooth Tab Transition Animations */
+.tab-pane {
+  will-change: opacity, transform, filter;
+}
+
+.tab-fade-enter-active {
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), filter 0.28s ease-out;
+}
+
+.tab-fade-leave-active {
+  transition: opacity 0.16s cubic-bezier(0.7, 0, 0.84, 0), transform 0.16s cubic-bezier(0.7, 0, 0.84, 0), filter 0.16s ease-in;
+}
+
+.tab-fade-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.995);
+  filter: blur(2px);
+}
+
+.tab-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.995);
+  filter: blur(1px);
 }
 
 /* Panes */
