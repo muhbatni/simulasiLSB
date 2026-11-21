@@ -70,10 +70,10 @@ const addRecipientError = ref('')
 
 // CSV Import Modal & Preview (F-05)
 const showCsvImportModal = ref(false)
-const csvTextInput = ref(`UINSA/FST/2026/011,Dewi Lestari,09020623011,Peserta
-UINSA/FST/2026/012,Bagus Setiawan,09020623012,Peserta
-UINSA/FST/2026/013,Fitri Handayani,09020623013,Peserta
-UINSA/FST/2026/014,Rizki Pratama,09020623014,Pemateri`)
+const csvTextInput = ref(`041/HIMAPROSIF/XI/2026/011,Dewi Lestari,09020623011,Peserta
+041/HIMAPROSIF/XI/2026/012,Bagus Setiawan,09020623012,Peserta
+041/HIMAPROSIF/XI/2026/013,Fitri Handayani,09020623013,Peserta
+041/HIMAPROSIF/XI/2026/014,Rizki Pratama,09020623014,Pemateri`)
 const csvFile = ref(null)
 const isPreviewingCsv = ref(false)
 const isImportingCsv = ref(false)
@@ -109,6 +109,7 @@ const newEventForm = ref({
   startTime: '08:00',
   endTime: '12:00',
   organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
+  certificatePrefix: '041/HIMAPROSIF/XI/2026/',
 })
 const newEventTemplate = ref(null)
 const isCreatingEvent = ref(false)
@@ -126,6 +127,9 @@ const customCoverFile = ref(null)
 const isGenerating = ref(false)
 const genResult = ref(null)
 const genError = ref('')
+
+const currentEvent = computed(() => events.value.find((e) => e.id === selectedEventId.value))
+const selectedEventForGen = computed(() => events.value.find((e) => e.id === genForm.value.eventId))
 
 // Audit Logs Filter (F-11)
 const logStatusFilter = ref('')
@@ -380,6 +384,13 @@ const handleDownloadZip = async () => {
 // F-03: Event Management (Create, Toggle Active, Delete)
 const handleCreateEvent = async () => {
   if (!newEventForm.value.eventName) return
+
+  const prefix = (newEventForm.value.certificatePrefix || '').trim()
+  if (!prefix.endsWith('/')) {
+    alert("Format nomor sertifikat ditolak! Harus diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)")
+    return
+  }
+
   isCreatingEvent.value = true
   try {
     const formData = new FormData()
@@ -388,6 +399,7 @@ const handleCreateEvent = async () => {
     if (newEventForm.value.startTime) formData.append('startTime', newEventForm.value.startTime)
     if (newEventForm.value.endTime) formData.append('endTime', newEventForm.value.endTime)
     formData.append('organizer', newEventForm.value.organizer)
+    formData.append('certificatePrefix', prefix)
 
     if (newEventTemplate.value) {
       formData.append('templateImage', newEventTemplate.value)
@@ -403,6 +415,7 @@ const handleCreateEvent = async () => {
     newEventForm.value.eventDate = new Date().toISOString().split('T')[0]
     newEventForm.value.startTime = '08:00'
     newEventForm.value.endTime = '12:00'
+    newEventForm.value.certificatePrefix = '041/HIMAPROSIF/XI/2026/'
     newEventTemplate.value = null
     await loadDashboardData()
     alert('Agenda kegiatan berhasil ditambahkan!')
@@ -422,6 +435,7 @@ const editingEventForm = ref({
   startTime: '',
   endTime: '',
   organizer: '',
+  certificatePrefix: '',
 })
 const editEventTemplate = ref(null)
 const isUpdatingEvent = ref(false)
@@ -435,6 +449,7 @@ const openEditEventModal = (event) => {
     startTime: event.startTime || '',
     endTime: event.endTime || '',
     organizer: event.organizer || '',
+    certificatePrefix: event.certificatePrefix || '041/HIMAPROSIF/XI/2026/',
   }
   editEventTemplate.value = null
   editEventError.value = ''
@@ -443,6 +458,13 @@ const openEditEventModal = (event) => {
 
 const handleUpdateEvent = async () => {
   if (!editingEventForm.value.eventName) return
+
+  const prefix = (editingEventForm.value.certificatePrefix || '').trim()
+  if (prefix && !prefix.endsWith('/')) {
+    editEventError.value = "Format nomor sertifikat ditolak! Harus diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)"
+    return
+  }
+
   isUpdatingEvent.value = true
   editEventError.value = ''
 
@@ -453,6 +475,9 @@ const handleUpdateEvent = async () => {
     formData.append('startTime', editingEventForm.value.startTime || '')
     formData.append('endTime', editingEventForm.value.endTime || '')
     formData.append('organizer', editingEventForm.value.organizer)
+    if (prefix) {
+      formData.append('certificatePrefix', prefix)
+    }
 
     if (editEventTemplate.value) {
       formData.append('templateImage', editEventTemplate.value)
@@ -1017,6 +1042,18 @@ onMounted(() => {
                 </div>
 
                 <div class="form-group">
+                  <label class="form-label">Format / Pola Nomor Sertifikat (Wajib Akhiran '/')</label>
+                  <input
+                    type="text"
+                    v-model="newEventForm.certificatePrefix"
+                    class="form-input font-mono"
+                    placeholder="Contoh: 041/HIMAPROSIF/XI/2026/"
+                    required
+                  />
+                  <small class="form-hint">Format wajib diakhiri tanda garis miring '<code>/</code>' (contoh: <code>041/HIMAPROSIF/XI/2026/</code>). Nomor urut sertifikat (001, 002, dst.) otomatis ditambahkan setelah tanda garis miring.</small>
+                </div>
+
+                <div class="form-group">
                   <label class="form-label">Unggah Citra Template Sertifikat (Wajib PNG Lossless)</label>
                   <input
                     type="file"
@@ -1045,6 +1082,9 @@ onMounted(() => {
                   <div class="e-info">
                     <div class="e-badge-row">
                       <span class="badge badge-brand">{{ evt.totalCertificates || 0 }} Sertifikat Terbit</span>
+                      <span v-if="evt.certificatePrefix" class="badge badge-brand font-mono">
+                        Pola: {{ evt.certificatePrefix }}XXX
+                      </span>
                       <span v-if="evt.templateImagePath" class="badge badge-valid">Template PNG Terunggah</span>
                       <span v-else class="badge badge-manipulated">Tanpa Template</span>
                       <span v-if="evt.startTime || evt.endTime" class="badge badge-brand">
@@ -1135,9 +1175,12 @@ onMounted(() => {
                   <input
                     type="text"
                     v-model="genForm.certificateNumber"
-                    class="form-input"
-                    placeholder="Contoh: UINSA/FST/SI/2026/015"
+                    class="form-input font-mono"
+                    :placeholder="selectedEventForGen?.certificatePrefix ? selectedEventForGen.certificatePrefix + '001' : 'Contoh: 041/HIMAPROSIF/XI/2026/001'"
                   />
+                  <small class="form-hint">
+                    Kosongkan untuk penomoran otomatis berurutan sesuai pola agenda event: <code>{{ selectedEventForGen?.certificatePrefix || '041/HIMAPROSIF/XI/2026/' }}001</code>
+                  </small>
                 </div>
 
                 <div class="form-group">
@@ -1371,6 +1414,18 @@ onMounted(() => {
           </div>
 
           <div class="form-group">
+            <label class="form-label">Format / Pola Nomor Sertifikat (Wajib Akhiran '/')</label>
+            <input
+              type="text"
+              v-model="editingEventForm.certificatePrefix"
+              class="form-input font-mono"
+              placeholder="Contoh: 041/HIMAPROSIF/XI/2026/"
+              required
+            />
+            <small class="form-hint">Format harus diakhiri tanda garis miring '<code>/</code>' (contoh: <code>041/HIMAPROSIF/XI/2026/</code>). Nomor urutan peserta (001, 002, dst.) diteruskan otomatis.</small>
+          </div>
+
+          <div class="form-group">
             <label class="form-label">Ganti Citra Template Sertifikat (Opsional, PNG Maks 10 MB)</label>
             <input
               type="file"
@@ -1425,7 +1480,15 @@ onMounted(() => {
           </div>
           <div class="form-group">
             <label class="form-label">Nomor Sertifikat (Opsional, unik)</label>
-            <input type="text" v-model="newRecipientForm.certificateNumber" class="form-input" placeholder="Otomatis digenerate jika kosong" />
+            <input
+              type="text"
+              v-model="newRecipientForm.certificateNumber"
+              class="form-input font-mono"
+              :placeholder="currentEvent?.certificatePrefix ? 'Otomatis: ' + currentEvent.certificatePrefix + '001' : 'Otomatis digenerate jika kosong'"
+            />
+            <small class="form-hint">
+              Kosongkan untuk penomoran otomatis berurutan sesuai pola agenda event (<code>{{ currentEvent?.certificatePrefix || '041/HIMAPROSIF/XI/2026/' }}001</code>)
+            </small>
           </div>
 
           <div v-if="addRecipientError" class="login-error-alert">

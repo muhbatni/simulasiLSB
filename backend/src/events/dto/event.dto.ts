@@ -3,6 +3,7 @@ import {
   IsString,
   MaxLength,
   IsOptional,
+  Matches,
 } from 'class-validator';
 
 export class CreateEventDto {
@@ -30,6 +31,14 @@ export class CreateEventDto {
   @IsString({ message: 'Penyelenggara event harus berupa teks' })
   @MaxLength(150, { message: 'Penyelenggara event maksimal 150 karakter' })
   organizer!: string;
+
+  @IsNotEmpty({ message: 'Format nomor sertifikat wajib diisi' })
+  @IsString({ message: 'Format nomor sertifikat harus berupa teks' })
+  @MaxLength(100, { message: 'Format nomor sertifikat maksimal 100 karakter' })
+  @Matches(/\/$/, {
+    message: "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
+  })
+  certificatePrefix!: string;
 }
 
 export class UpdateEventDto {
@@ -57,6 +66,14 @@ export class UpdateEventDto {
   @IsString({ message: 'Penyelenggara event harus berupa teks' })
   @MaxLength(150, { message: 'Penyelenggara event maksimal 150 karakter' })
   organizer?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Format nomor sertifikat harus berupa teks' })
+  @MaxLength(100, { message: 'Format nomor sertifikat maksimal 100 karakter' })
+  @Matches(/\/$/, {
+    message: "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
+  })
+  certificatePrefix?: string;
 }
 
 export class CreateRecipientDto {

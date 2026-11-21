@@ -39,6 +39,7 @@ model Event {
   startTime         String?  @map("start_time")
   endTime           String?  @map("end_time")
   organizer         String
+  certificatePrefix String?  @default("041/HIMAPROSIF/XI/2026/") @map("certificate_prefix")
   templateImagePath String?  @map("template_image_path")
   createdBy         String   @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")

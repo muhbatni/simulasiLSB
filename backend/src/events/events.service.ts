@@ -71,6 +71,12 @@ export class EventsService {
     data: CreateEventDto & { templateImagePath?: string; createdBy: string },
   ): Promise<Event> {
     const cleanDateOnly = (val: string) => String(val || '').split('T')[0].split(' ')[0].trim();
+    const certPrefix = (data.certificatePrefix || '041/HIMAPROSIF/XI/2026/').trim();
+    if (!certPrefix.endsWith('/')) {
+      throw new BadRequestException(
+        "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
+      );
+    }
 
     return this.prisma.event.create({
       data: {
@@ -79,6 +85,7 @@ export class EventsService {
         startTime: data.startTime ? data.startTime.trim() : null,
         endTime: data.endTime ? data.endTime.trim() : null,
         organizer: data.organizer.trim(),
+        certificatePrefix: certPrefix,
         templateImagePath: data.templateImagePath,
         createdBy: data.createdBy,
       },
@@ -91,6 +98,15 @@ export class EventsService {
   ): Promise<Event> {
     const existing = await this.getEventById(id);
     const cleanDateOnly = (val: string) => String(val || '').split('T')[0].split(' ')[0].trim();
+
+    if (data.certificatePrefix !== undefined) {
+      const pfx = (data.certificatePrefix || '').trim();
+      if (!pfx.endsWith('/')) {
+        throw new BadRequestException(
+          "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
+        );
+      }
+    }
 
     // Jika template baru diunggah dan template lama ada, hapus file template lama
     if (data.templateImagePath && existing.templateImagePath) {
@@ -113,6 +129,7 @@ export class EventsService {
         ...(data.startTime !== undefined && { startTime: data.startTime ? data.startTime.trim() : null }),
         ...(data.endTime !== undefined && { endTime: data.endTime ? data.endTime.trim() : null }),
         ...(data.organizer !== undefined && { organizer: data.organizer.trim() }),
+        ...(data.certificatePrefix !== undefined && { certificatePrefix: data.certificatePrefix.trim() }),
         ...(data.templateImagePath !== undefined && { templateImagePath: data.templateImagePath }),
       },
     });
@@ -183,15 +200,43 @@ export class EventsService {
     });
   }
 
+  async getNextCertificateNumber(eventId: string, customPrefix?: string): Promise<string> {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    let prefix = customPrefix || event?.certificatePrefix || '041/HIMAPROSIF/XI/2026/';
+    if (!prefix.endsWith('/')) {
+      prefix += '/';
+    }
+
+    const count = await this.prisma.certificate.count({
+      where: { eventId },
+    });
+
+    let seq = count + 1;
+    let candidate = `${prefix}${String(seq).padStart(3, '0')}`;
+    while (await this.prisma.certificate.findUnique({ where: { certificateNumber: candidate } })) {
+      seq++;
+      candidate = `${prefix}${String(seq).padStart(3, '0')}`;
+    }
+    return candidate;
+  }
+
   async addRecipient(eventId: string, dto: CreateRecipientDto): Promise<Certificate> {
-    await this.getEventById(eventId);
+    const event = await this.getEventById(eventId);
+    let eventPrefix = (event.certificatePrefix || '041/HIMAPROSIF/XI/2026/').trim();
+    if (!eventPrefix.endsWith('/')) {
+      eventPrefix += '/';
+    }
 
     const name = dto.recipientName.trim();
     const identifier = dto.recipientIdentifier.trim();
     const role = dto.recipientRole?.trim() || 'Peserta';
-    const certNum =
-      dto.certificateNumber?.trim() ||
-      `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+    
+    let certNum = dto.certificateNumber?.trim();
+    if (!certNum) {
+      certNum = await this.getNextCertificateNumber(eventId);
+    } else if (certNum.endsWith('/')) {
+      certNum = await this.getNextCertificateNumber(eventId, certNum);
+    }
 
     const existing = await this.prisma.certificate.findUnique({
       where: { certificateNumber: certNum },
@@ -226,7 +271,11 @@ export class EventsService {
     rows: CsvImportRow[];
     importedItems?: Certificate[];
   }> {
-    await this.getEventById(eventId);
+    const event = await this.getEventById(eventId);
+    let eventPrefix = (event.certificatePrefix || '041/HIMAPROSIF/XI/2026/').trim();
+    if (!eventPrefix.endsWith('/')) {
+      eventPrefix += '/';
+    }
 
     // Bersihkan UTF-8 BOM jika ada
     const cleanContent = csvContent.replace(/^\uFEFF/, '');
@@ -304,10 +353,26 @@ export class EventsService {
       const name = colNameIdx !== -1 ? parts[colNameIdx] || '' : parts[0] || '';
       const identifier = colIdIdx !== -1 ? parts[colIdIdx] || '' : parts[1] || '';
       const role = colRoleIdx !== -1 ? parts[colRoleIdx] || 'Peserta' : parts[2] || 'Peserta';
-      let certNum =
-        colCertNumIdx !== -1 && parts[colCertNumIdx]
-          ? parts[colCertNumIdx]
-          : `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+      let rawCertNum = colCertNumIdx !== -1 && parts[colCertNumIdx] ? parts[colCertNumIdx].trim() : '';
+      let certNum = '';
+
+      if (!rawCertNum) {
+        let seq = usedCertNumbers.size + 1;
+        certNum = `${eventPrefix}${String(seq).padStart(3, '0')}`;
+        while (usedCertNumbers.has(certNum.toLowerCase())) {
+          seq++;
+          certNum = `${eventPrefix}${String(seq).padStart(3, '0')}`;
+        }
+      } else if (rawCertNum.endsWith('/')) {
+        let seq = usedCertNumbers.size + 1;
+        certNum = `${rawCertNum}${String(seq).padStart(3, '0')}`;
+        while (usedCertNumbers.has(certNum.toLowerCase())) {
+          seq++;
+          certNum = `${rawCertNum}${String(seq).padStart(3, '0')}`;
+        }
+      } else {
+        certNum = rawCertNum;
+      }
 
       let isValid = true;
       let errorMessage = '';
@@ -374,6 +439,6 @@ export class EventsService {
   }
 
   getCsvTemplate(): string {
-    return 'nomor_sertifikat,nama,nim_email,peran\nUINSA/FST/2026/001,Ahmad Fulan,09020623001,Peserta\nUINSA/FST/2026/002,Siti Nurhaliza,09020623002,Pemateri';
+    return 'nomor_sertifikat,nama,nim_email,peran\n041/HIMAPROSIF/XI/2026/001,Ahmad Fulan,09020623001,Peserta\n041/HIMAPROSIF/XI/2026/002,Siti Nurhaliza,09020623002,Pemateri';
   }
 }

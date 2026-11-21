@@ -196,9 +196,33 @@ export class CertificatesService {
       throw new NotFoundException(`Event dengan ID ${dto.eventId} tidak ditemukan`);
     }
 
-    const certNumber =
-      dto.certificateNumber ||
-      `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+    let certNumber = dto.certificateNumber?.trim();
+    let prefix = (event.certificatePrefix || '041/HIMAPROSIF/XI/2026/').trim();
+    if (!prefix.endsWith('/')) prefix += '/';
+
+    if (!certNumber) {
+      const count = await this.prisma.certificate.count({
+        where: { eventId: event.id },
+      });
+      let seq = count + 1;
+      certNumber = `${prefix}${String(seq).padStart(3, '0')}`;
+      while (await this.prisma.certificate.findUnique({ where: { certificateNumber: certNumber } })) {
+        seq++;
+        certNumber = `${prefix}${String(seq).padStart(3, '0')}`;
+      }
+    } else if (certNumber.endsWith('/')) {
+      const count = await this.prisma.certificate.count({
+        where: { eventId: event.id },
+      });
+      let seq = count + 1;
+      const customPfx = certNumber;
+      certNumber = `${customPfx}${String(seq).padStart(3, '0')}`;
+      while (await this.prisma.certificate.findUnique({ where: { certificateNumber: certNumber } })) {
+        seq++;
+        certNumber = `${customPfx}${String(seq).padStart(3, '0')}`;
+      }
+    }
+
     const role = dto.recipientRole || 'Peserta';
 
     // Cek apakah sudah ada record dengan nomor sertifikat ini
@@ -353,11 +377,29 @@ export class CertificatesService {
     let success = 0;
     let failed = 0;
 
+    let prefix = (event.certificatePrefix || '041/HIMAPROSIF/XI/2026/').trim();
+    if (!prefix.endsWith('/')) prefix += '/';
+    let seqCounter = (await this.prisma.certificate.count({ where: { eventId } })) + 1;
+
     for (const r of recipients) {
       try {
-        const certNum =
-          r.certificateNumber ||
-          `UINSA/FST/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+        let certNum = r.certificateNumber?.trim();
+        if (!certNum) {
+          certNum = `${prefix}${String(seqCounter).padStart(3, '0')}`;
+          while (await this.prisma.certificate.findUnique({ where: { certificateNumber: certNum } })) {
+            seqCounter++;
+            certNum = `${prefix}${String(seqCounter).padStart(3, '0')}`;
+          }
+          seqCounter++;
+        } else if (certNum.endsWith('/')) {
+          const customPfx = certNum;
+          certNum = `${customPfx}${String(seqCounter).padStart(3, '0')}`;
+          while (await this.prisma.certificate.findUnique({ where: { certificateNumber: certNum } })) {
+            seqCounter++;
+            certNum = `${customPfx}${String(seqCounter).padStart(3, '0')}`;
+          }
+          seqCounter++;
+        }
 
         let certRecord = await this.prisma.certificate.findUnique({
           where: { certificateNumber: certNum },

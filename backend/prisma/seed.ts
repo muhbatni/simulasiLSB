@@ -52,7 +52,9 @@ async function main() {
   // 2. Seed Events
   const evt1 = await prisma.event.upsert({
     where: { id: 'evt-ai-sec-2026' },
-    update: {},
+    update: {
+      certificatePrefix: '041/HIMAPROSIF/XI/2026/',
+    },
     create: {
       id: 'evt-ai-sec-2026',
       eventName: 'Seminar Nasional AI & Keamanan Informasi Digital 2026',
@@ -60,13 +62,16 @@ async function main() {
       startTime: '08:30',
       endTime: '12:00',
       organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
+      certificatePrefix: '041/HIMAPROSIF/XI/2026/',
       createdBy: admin.id,
     },
   });
 
   const evt2 = await prisma.event.upsert({
     where: { id: 'evt-web-nest-vue' },
-    update: {},
+    update: {
+      certificatePrefix: '042/HIMAPROSIF/XI/2026/',
+    },
     create: {
       id: 'evt-web-nest-vue',
       eventName: 'Workshop Fullstack Modern NestJS & Vue.js 3',
@@ -74,13 +79,16 @@ async function main() {
       startTime: '09:00',
       endTime: '15:00',
       organizer: 'Himpunan Mahasiswa Program Studi Sistem Informasi (HIMAPROSIF) UINSA',
+      certificatePrefix: '042/HIMAPROSIF/XI/2026/',
       createdBy: himasi.id,
     },
   });
 
   const evt3 = await prisma.event.upsert({
     where: { id: 'evt-crypto-stego' },
-    update: {},
+    update: {
+      certificatePrefix: '043/LAB-RPL/XI/2026/',
+    },
     create: {
       id: 'evt-crypto-stego',
       eventName: 'Pelatihan Keamanan Siber: LSB Steganography & SHA-256',
@@ -88,8 +96,15 @@ async function main() {
       startTime: '13:00',
       endTime: '16:30',
       organizer: 'Laboratorium Rekayasa Perangkat Lunak & Siber FST UINSA',
+      certificatePrefix: '043/LAB-RPL/XI/2026/',
       createdBy: admin.id,
     },
+  });
+
+  // Pastikan semua event yang belum memiliki certificatePrefix terisi nilai default
+  await prisma.event.updateMany({
+    where: { certificatePrefix: null },
+    data: { certificatePrefix: '041/HIMAPROSIF/XI/2026/' },
   });
 
   console.log(`[Seed] Berhasil membuat 3 data event default.`);

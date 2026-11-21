@@ -99,12 +99,20 @@ export class EventsController {
       templateImagePath = fileName;
     }
 
+    const certPrefix = (body.certificatePrefix || '041/HIMAPROSIF/XI/2026/').trim();
+    if (!certPrefix.endsWith('/')) {
+      throw new BadRequestException(
+        "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
+      );
+    }
+
     return this.eventsService.createEvent({
       eventName: body.eventName,
       eventDate: body.eventDate,
       startTime: body.startTime,
       endTime: body.endTime,
       organizer: body.organizer,
+      certificatePrefix: certPrefix,
       templateImagePath,
       createdBy: req.user?.sub || 'admin',
     });
@@ -154,8 +162,18 @@ export class EventsController {
       templateImagePath = fileName;
     }
 
+    if (body.certificatePrefix !== undefined) {
+      const pfx = (body.certificatePrefix || '').trim();
+      if (!pfx.endsWith('/')) {
+        throw new BadRequestException(
+          "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
+        );
+      }
+    }
+
     return this.eventsService.updateEvent(id, {
       ...body,
+      ...(body.certificatePrefix !== undefined ? { certificatePrefix: body.certificatePrefix.trim() } : {}),
       ...(templateImagePath ? { templateImagePath } : {}),
     });
   }
