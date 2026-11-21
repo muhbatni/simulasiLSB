@@ -28,7 +28,8 @@ import {
   CheckSquare,
   Square,
   Archive,
-  Pencil
+  Pencil,
+  Clock
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -89,10 +90,24 @@ const issueResult = ref(null)
 const selectedIssuedCertIds = ref([])
 const isDownloadingZip = ref(false)
 
+const formatDateOnly = (d) => {
+  if (!d) return ''
+  return String(d).split('T')[0].split(' ')[0]
+}
+
+const formatEventTime = (start, end) => {
+  if (start && end) return `${start} - ${end} WIB`
+  if (start) return `${start} WIB`
+  if (end) return `s.d. ${end} WIB`
+  return ''
+}
+
 // Event Form & Editing (F-03)
 const newEventForm = ref({
   eventName: '',
   eventDate: new Date().toISOString().split('T')[0],
+  startTime: '08:00',
+  endTime: '12:00',
   organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
 })
 const newEventTemplate = ref(null)
@@ -369,7 +384,9 @@ const handleCreateEvent = async () => {
   try {
     const formData = new FormData()
     formData.append('eventName', newEventForm.value.eventName)
-    formData.append('eventDate', newEventForm.value.eventDate)
+    formData.append('eventDate', formatDateOnly(newEventForm.value.eventDate))
+    if (newEventForm.value.startTime) formData.append('startTime', newEventForm.value.startTime)
+    if (newEventForm.value.endTime) formData.append('endTime', newEventForm.value.endTime)
     formData.append('organizer', newEventForm.value.organizer)
 
     if (newEventTemplate.value) {
@@ -383,6 +400,9 @@ const handleCreateEvent = async () => {
     })
 
     newEventForm.value.eventName = ''
+    newEventForm.value.eventDate = new Date().toISOString().split('T')[0]
+    newEventForm.value.startTime = '08:00'
+    newEventForm.value.endTime = '12:00'
     newEventTemplate.value = null
     await loadDashboardData()
     alert('Agenda kegiatan berhasil ditambahkan!')
@@ -399,6 +419,8 @@ const editingEventForm = ref({
   id: '',
   eventName: '',
   eventDate: '',
+  startTime: '',
+  endTime: '',
   organizer: '',
 })
 const editEventTemplate = ref(null)
@@ -409,7 +431,9 @@ const openEditEventModal = (event) => {
   editingEventForm.value = {
     id: event.id,
     eventName: event.eventName || '',
-    eventDate: event.eventDate || '',
+    eventDate: formatDateOnly(event.eventDate),
+    startTime: event.startTime || '',
+    endTime: event.endTime || '',
     organizer: event.organizer || '',
   }
   editEventTemplate.value = null
@@ -425,7 +449,9 @@ const handleUpdateEvent = async () => {
   try {
     const formData = new FormData()
     formData.append('eventName', editingEventForm.value.eventName)
-    formData.append('eventDate', editingEventForm.value.eventDate)
+    formData.append('eventDate', formatDateOnly(editingEventForm.value.eventDate))
+    formData.append('startTime', editingEventForm.value.startTime || '')
+    formData.append('endTime', editingEventForm.value.endTime || '')
     formData.append('organizer', editingEventForm.value.organizer)
 
     if (editEventTemplate.value) {
@@ -709,7 +735,7 @@ onMounted(() => {
                 <label class="form-label">Pilih Agenda Kegiatan:</label>
                 <select v-model="selectedEventId" @change="handleEventChange" class="form-select event-select">
                   <option v-for="e in events" :key="e.id" :value="e.id">
-                    {{ e.eventName }} ({{ e.eventDate }})
+                    {{ e.eventName }} ({{ formatDateOnly(e.eventDate) }}{{ e.startTime ? ' ' + e.startTime : '' }})
                   </option>
                 </select>
               </div>
@@ -942,11 +968,47 @@ onMounted(() => {
                     model-type="yyyy-MM-dd"
                     format="yyyy-MM-dd"
                     :enable-time-picker="false"
+                    :time-config="{ enableTimePicker: false }"
+                    :teleport="true"
+                    teleport-center
                     auto-apply
                     placeholder="Pilih Tanggal Pelaksanaan"
                     dark
                     required
                   />
+                </div>
+
+                <div class="grid-2-col-sm">
+                  <div class="form-group">
+                    <label class="form-label">Waktu Mulai (Opsional)</label>
+                    <VueDatePicker
+                      v-model="newEventForm.startTime"
+                      time-picker
+                      model-type="HH:mm"
+                      format="HH:mm"
+                      :is-24="true"
+                      :teleport="true"
+                      teleport-center
+                      auto-apply
+                      placeholder="08:00"
+                      dark
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Waktu Selesai (Opsional)</label>
+                    <VueDatePicker
+                      v-model="newEventForm.endTime"
+                      time-picker
+                      model-type="HH:mm"
+                      format="HH:mm"
+                      :is-24="true"
+                      :teleport="true"
+                      teleport-center
+                      auto-apply
+                      placeholder="12:00"
+                      dark
+                    />
+                  </div>
                 </div>
 
                 <div class="form-group">
@@ -985,9 +1047,16 @@ onMounted(() => {
                       <span class="badge badge-brand">{{ evt.totalCertificates || 0 }} Sertifikat Terbit</span>
                       <span v-if="evt.templateImagePath" class="badge badge-valid">Template PNG Terunggah</span>
                       <span v-else class="badge badge-manipulated">Tanpa Template</span>
+                      <span v-if="evt.startTime || evt.endTime" class="badge badge-brand">
+                        <Clock :size="12" /> {{ formatEventTime(evt.startTime, evt.endTime) }}
+                      </span>
                     </div>
                     <h4 class="e-name">{{ evt.eventName }}</h4>
-                    <p class="e-sub">{{ evt.eventDate }} &bull; {{ evt.organizer }}</p>
+                    <p class="e-sub">
+                      <span>{{ formatDateOnly(evt.eventDate) }}</span>
+                      <span v-if="evt.startTime || evt.endTime"> &bull; {{ formatEventTime(evt.startTime, evt.endTime) }}</span>
+                      <span> &bull; {{ evt.organizer }}</span>
+                    </p>
                   </div>
 
                   <div class="e-actions">
@@ -1025,7 +1094,7 @@ onMounted(() => {
                   <label class="form-label">Pilih Agenda Kegiatan</label>
                   <select v-model="genForm.eventId" class="form-select" required>
                     <option v-for="e in events" :key="e.id" :value="e.id">
-                      {{ e.eventName }} ({{ e.eventDate }})
+                      {{ e.eventName }} ({{ formatDateOnly(e.eventDate) }}{{ e.startTime ? ' ' + e.startTime : '' }})
                     </option>
                   </select>
                 </div>
@@ -1248,10 +1317,47 @@ onMounted(() => {
               model-type="yyyy-MM-dd"
               format="yyyy-MM-dd"
               :enable-time-picker="false"
+              :time-config="{ enableTimePicker: false }"
+              :teleport="true"
+              teleport-center
               auto-apply
+              placeholder="Pilih Tanggal Pelaksanaan"
               dark
               required
             />
+          </div>
+
+          <div class="grid-2-col-sm">
+            <div class="form-group">
+              <label class="form-label">Waktu Mulai (Opsional)</label>
+              <VueDatePicker
+                v-model="editingEventForm.startTime"
+                time-picker
+                model-type="HH:mm"
+                format="HH:mm"
+                :is-24="true"
+                :teleport="true"
+                teleport-center
+                auto-apply
+                placeholder="08:00"
+                dark
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Waktu Selesai (Opsional)</label>
+              <VueDatePicker
+                v-model="editingEventForm.endTime"
+                time-picker
+                model-type="HH:mm"
+                format="HH:mm"
+                :is-24="true"
+                :teleport="true"
+                teleport-center
+                auto-apply
+                placeholder="12:00"
+                dark
+              />
+            </div>
           </div>
 
           <div class="form-group">
@@ -1979,7 +2085,7 @@ onMounted(() => {
   }
 }
 
-/* Custom VueDatePicker theme integration */
+/* Custom Responsive VueDatePicker theme integration (MUI-like dark theme) */
 :deep(.dp__theme_dark) {
   --dp-background-color: #121826;
   --dp-text-color: #f1f5f9;

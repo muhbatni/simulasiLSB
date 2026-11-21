@@ -362,7 +362,7 @@ const loadSampleCertificate = async (type = 'valid') => {
                 </div>
                 <div class="meta-field">
                   <span class="f-label">Tanggal Pelaksanaan</span>
-                  <span class="f-val">{{ verificationResult.metadata.tanggal }}</span>
+                  <span class="f-val">{{ (verificationResult.metadata.tanggal || '').split('T')[0].split(' ')[0] }}</span>
                 </div>
                 <div class="meta-field">
                   <span class="f-label">Penyelenggara</span>

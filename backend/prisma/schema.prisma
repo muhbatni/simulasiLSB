@@ -36,6 +36,8 @@ model Event {
   id                String   @id @default(uuid())
   eventName         String   @map("event_name")
   eventDate         String   @map("event_date")
+  startTime         String?  @map("start_time")
+  endTime           String?  @map("end_time")
   organizer         String
   templateImagePath String?  @map("template_image_path")
   createdBy         String   @map("created_by")

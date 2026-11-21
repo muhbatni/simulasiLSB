@@ -102,6 +102,8 @@ export class EventsController {
     return this.eventsService.createEvent({
       eventName: body.eventName,
       eventDate: body.eventDate,
+      startTime: body.startTime,
+      endTime: body.endTime,
       organizer: body.organizer,
       templateImagePath,
       createdBy: req.user?.sub || 'admin',

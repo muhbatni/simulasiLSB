@@ -16,6 +16,16 @@ export class CreateEventDto {
   @MaxLength(50, { message: 'Tanggal event maksimal 50 karakter' })
   eventDate!: string;
 
+  @IsOptional()
+  @IsString({ message: 'Waktu mulai harus berupa teks' })
+  @MaxLength(20, { message: 'Waktu mulai maksimal 20 karakter' })
+  startTime?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Waktu selesai harus berupa teks' })
+  @MaxLength(20, { message: 'Waktu selesai maksimal 20 karakter' })
+  endTime?: string;
+
   @IsNotEmpty({ message: 'Penyelenggara event wajib diisi' })
   @IsString({ message: 'Penyelenggara event harus berupa teks' })
   @MaxLength(150, { message: 'Penyelenggara event maksimal 150 karakter' })
@@ -32,6 +42,16 @@ export class UpdateEventDto {
   @IsString({ message: 'Tanggal event harus berupa teks' })
   @MaxLength(50, { message: 'Tanggal event maksimal 50 karakter' })
   eventDate?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Waktu mulai harus berupa teks' })
+  @MaxLength(20, { message: 'Waktu mulai maksimal 20 karakter' })
+  startTime?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Waktu selesai harus berupa teks' })
+  @MaxLength(20, { message: 'Waktu selesai maksimal 20 karakter' })
+  endTime?: string;
 
   @IsOptional()
   @IsString({ message: 'Penyelenggara event harus berupa teks' })

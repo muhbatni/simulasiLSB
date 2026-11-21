@@ -70,10 +70,14 @@ export class EventsService {
   async createEvent(
     data: CreateEventDto & { templateImagePath?: string; createdBy: string },
   ): Promise<Event> {
+    const cleanDateOnly = (val: string) => String(val || '').split('T')[0].split(' ')[0].trim();
+
     return this.prisma.event.create({
       data: {
         eventName: data.eventName.trim(),
-        eventDate: data.eventDate.trim(),
+        eventDate: cleanDateOnly(data.eventDate),
+        startTime: data.startTime ? data.startTime.trim() : null,
+        endTime: data.endTime ? data.endTime.trim() : null,
         organizer: data.organizer.trim(),
         templateImagePath: data.templateImagePath,
         createdBy: data.createdBy,
@@ -86,6 +90,7 @@ export class EventsService {
     data: UpdateEventDto & { templateImagePath?: string },
   ): Promise<Event> {
     const existing = await this.getEventById(id);
+    const cleanDateOnly = (val: string) => String(val || '').split('T')[0].split(' ')[0].trim();
 
     // Jika template baru diunggah dan template lama ada, hapus file template lama
     if (data.templateImagePath && existing.templateImagePath) {
@@ -104,7 +109,9 @@ export class EventsService {
       where: { id },
       data: {
         ...(data.eventName !== undefined && { eventName: data.eventName.trim() }),
-        ...(data.eventDate !== undefined && { eventDate: data.eventDate.trim() }),
+        ...(data.eventDate !== undefined && { eventDate: cleanDateOnly(data.eventDate) }),
+        ...(data.startTime !== undefined && { startTime: data.startTime ? data.startTime.trim() : null }),
+        ...(data.endTime !== undefined && { endTime: data.endTime ? data.endTime.trim() : null }),
         ...(data.organizer !== undefined && { organizer: data.organizer.trim() }),
         ...(data.templateImagePath !== undefined && { templateImagePath: data.templateImagePath }),
       },
