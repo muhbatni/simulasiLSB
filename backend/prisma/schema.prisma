@@ -41,6 +41,7 @@ model Event {
   organizer         String
   certificatePrefix String?  @default("041/HIMAPROSIF/XI/2026/") @map("certificate_prefix")
   templateImagePath String?  @map("template_image_path")
+  templatePositions Json?    @map("template_positions")
   createdBy         String   @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
 

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "baseUrl": "./backend",
+    "paths": {
+      "@prisma/client": ["./backend/node_modules/@prisma/client"],
+      "*": ["./backend/node_modules/*"]
+    },
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "backend/src/**/*"
+  ]
+}

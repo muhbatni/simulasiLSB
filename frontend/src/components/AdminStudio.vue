@@ -30,7 +30,13 @@ import {
   Square,
   Archive,
   Pencil,
-  Clock
+  Clock,
+  Move,
+  Sliders,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Palette
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -443,11 +449,14 @@ const handleCreateEvent = async () => {
       formData.append('templateImage', newEventTemplate.value)
     }
 
-    await api.post('/events', formData, {
+    const res = await api.post('/events', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     })
+
+    const createdEvent = res.data
+    const hadTemplate = !!newEventTemplate.value
 
     newEventForm.value.eventName = ''
     newEventForm.value.eventDate = new Date().toISOString().split('T')[0]
@@ -457,6 +466,13 @@ const handleCreateEvent = async () => {
     newEventTemplate.value = null
     await loadDashboardData()
     dialog.success('Agenda kegiatan berhasil ditambahkan!')
+
+    // Jika event memiliki template citra, langsung buka modal Autocrat secara otomatis
+    if (hadTemplate && createdEvent && createdEvent.id) {
+      setTimeout(() => {
+        openAutocratModal(createdEvent)
+      }, 400)
+    }
   } catch (err) {
     dialog.error(err.response?.data?.message || 'Gagal membuat event')
   } finally {
@@ -488,10 +504,218 @@ const openEditEventModal = (event) => {
     endTime: event.endTime || '',
     organizer: event.organizer || '',
     certificatePrefix: event.certificatePrefix || '041/HIMAPROSIF/XI/2026/',
+    templateImagePath: event.templateImagePath || '',
+    templatePositions: event.templatePositions || null,
   }
   editEventTemplate.value = null
   editEventError.value = ''
   showEditEventModal.value = true
+}
+
+// ==========================================
+// AUTOCRAT TEMPLATE POSITIONS VISUAL EDITOR
+// ==========================================
+const showAutocratModal = ref(false)
+const autocratEvent = ref(null)
+const autocratImageSrc = ref('')
+const isLoadingAutocratImage = ref(false)
+const isSavingAutocrat = ref(false)
+const autocratError = ref('')
+const activeAutocratElement = ref('name') // 'name' | 'role' | 'number'
+
+const defaultPositions = {
+  number: {
+    x: 54.0,
+    y: 26.5,
+    fontSize: 16,
+    color: '#333333',
+    align: 'left',
+    prefix: '',
+    show: true,
+  },
+  name: {
+    x: 50.0,
+    y: 40.5,
+    fontSize: 46,
+    color: '#A14646',
+    align: 'center',
+    prefix: '',
+    show: true,
+  },
+  role: {
+    x: 64.5,
+    y: 47.8,
+    fontSize: 20,
+    color: '#DA6556',
+    align: 'left',
+    prefix: '',
+    show: true,
+  },
+}
+
+const autocratPositions = ref(JSON.parse(JSON.stringify(defaultPositions)))
+
+const autocratCanvasRef = ref(null)
+const isDragging = ref(false)
+const draggedElement = ref(null)
+
+const openAutocratModal = async (evt) => {
+  if (!evt || !evt.id) return
+  autocratEvent.value = evt
+  autocratError.value = ''
+  activeAutocratElement.value = 'name'
+
+  // Muat posisi yang tersimpan atau gunakan default UIN rekomendasi
+  if (evt.templatePositions && typeof evt.templatePositions === 'object') {
+    autocratPositions.value = {
+      number: { ...defaultPositions.number, ...(evt.templatePositions.number || {}) },
+      name: { ...defaultPositions.name, ...(evt.templatePositions.name || {}) },
+      role: { ...defaultPositions.role, ...(evt.templatePositions.role || {}) },
+    }
+  } else {
+    autocratPositions.value = JSON.parse(JSON.stringify(defaultPositions))
+  }
+
+  showAutocratModal.value = true
+  isLoadingAutocratImage.value = true
+  autocratImageSrc.value = ''
+
+  try {
+    const res = await api.get(`/events/${evt.id}/template-image`, {
+      responseType: 'blob',
+    })
+    autocratImageSrc.value = URL.createObjectURL(new Blob([res.data], { type: 'image/png' }))
+  } catch (err) {
+    autocratError.value = 'Gagal memuat citra template dari server. Pastikan file template PNG valid telah terunggah.'
+  } finally {
+    isLoadingAutocratImage.value = false
+  }
+}
+
+const applyUinPreset = () => {
+  autocratPositions.value = JSON.parse(JSON.stringify(defaultPositions))
+}
+
+const applyCenterPreset = () => {
+  autocratPositions.value = {
+    number: {
+      x: 50.0,
+      y: 28.0,
+      fontSize: 16,
+      color: '#444444',
+      align: 'center',
+      prefix: 'NOMOR: ',
+      show: true,
+    },
+    name: {
+      x: 50.0,
+      y: 42.0,
+      fontSize: 48,
+      color: '#A14646',
+      align: 'center',
+      prefix: '',
+      show: true,
+    },
+    role: {
+      x: 50.0,
+      y: 50.0,
+      fontSize: 22,
+      color: '#DA6556',
+      align: 'center',
+      prefix: 'Sebagai ',
+      show: true,
+    },
+  }
+}
+
+const startTagDrag = (elemKey, e) => {
+  activeAutocratElement.value = elemKey
+  isDragging.value = true
+  draggedElement.value = elemKey
+  e.preventDefault()
+  window.addEventListener('mousemove', onTagDragMove)
+  window.addEventListener('mouseup', endTagDrag)
+  window.addEventListener('touchmove', onTagTouchMove, { passive: false })
+  window.addEventListener('touchend', endTagDrag)
+}
+
+const onTagDragMove = (e) => {
+  if (!isDragging.value || !draggedElement.value || !autocratCanvasRef.value) return
+  updatePositionFromCoords(e.clientX, e.clientY)
+}
+
+const onTagTouchMove = (e) => {
+  if (!isDragging.value || !draggedElement.value || !autocratCanvasRef.value) return
+  if (e.touches && e.touches.length > 0) {
+    e.preventDefault()
+    updatePositionFromCoords(e.touches[0].clientX, e.touches[0].clientY)
+  }
+}
+
+const updatePositionFromCoords = (clientX, clientY) => {
+  const rect = autocratCanvasRef.value.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return
+
+  let x = ((clientX - rect.left) / rect.width) * 100
+  let y = ((clientY - rect.top) / rect.height) * 100
+
+  x = Math.max(0, Math.min(100, Math.round(x * 10) / 10))
+  y = Math.max(0, Math.min(100, Math.round(y * 10) / 10))
+
+  if (autocratPositions.value[draggedElement.value]) {
+    autocratPositions.value[draggedElement.value].x = x
+    autocratPositions.value[draggedElement.value].y = y
+  }
+}
+
+const endTagDrag = () => {
+  isDragging.value = false
+  draggedElement.value = null
+  window.removeEventListener('mousemove', onTagDragMove)
+  window.removeEventListener('mouseup', endTagDrag)
+  window.removeEventListener('touchmove', onTagTouchMove)
+  window.removeEventListener('touchend', endTagDrag)
+}
+
+const handleCanvasClick = (e) => {
+  if (isDragging.value || !activeAutocratElement.value || !autocratCanvasRef.value) return
+  if (e.target.closest('.autocrat-tag')) return
+
+  const rect = autocratCanvasRef.value.getBoundingClientRect()
+  let x = ((e.clientX - rect.left) / rect.width) * 100
+  let y = ((e.clientY - rect.top) / rect.height) * 100
+  x = Math.max(0, Math.min(100, Math.round(x * 10) / 10))
+  y = Math.max(0, Math.min(100, Math.round(y * 10) / 10))
+
+  if (autocratPositions.value[activeAutocratElement.value]) {
+    autocratPositions.value[activeAutocratElement.value].x = x
+    autocratPositions.value[activeAutocratElement.value].y = y
+  }
+}
+
+const handleSaveAutocratPositions = async () => {
+  if (!autocratEvent.value) return
+  isSavingAutocrat.value = true
+  autocratError.value = ''
+
+  try {
+    await api.patch(`/events/${autocratEvent.value.id}/template-positions`, {
+      templatePositions: autocratPositions.value,
+    })
+
+    const found = events.value.find((e) => e.id === autocratEvent.value.id)
+    if (found) {
+      found.templatePositions = JSON.parse(JSON.stringify(autocratPositions.value))
+    }
+
+    showAutocratModal.value = false
+    dialog.success('Konfigurasi posisi teks template sertifikat berhasil disimpan!')
+    await loadDashboardData()
+  } catch (err) {
+    autocratError.value = err.response?.data?.message || 'Gagal menyimpan posisi template'
+  } finally {
+    isSavingAutocrat.value = false
+  }
 }
 
 const handleUpdateEvent = async () => {
@@ -1110,7 +1334,9 @@ onMounted(() => {
                     @change="(e) => (newEventTemplate = e.target.files[0])"
                     class="form-input"
                   />
-                  <small class="form-hint">Format PNG murni (maks 10 MB). Nama peserta akan dioverlay otomatis sebelum LSB embedding.</small>
+                  <small class="form-hint" style="color: #fdb773;">
+                    💡 <strong>Sistem Autocrat:</strong> Setelah menekan tombol <strong>Simpan Agenda Event</strong> di bawah, editor visual Autocrat akan langsung terbuka otomatis agar Anda dapat menggeser posisi Nama, Nomor Sertifikat, dan Sebagai Apa.
+                  </small>
                 </div>
 
                 <button type="submit" class="btn btn-primary" :disabled="isCreatingEvent">
@@ -1149,6 +1375,16 @@ onMounted(() => {
                   </div>
 
                   <div class="e-actions">
+                    <button
+                      v-if="evt.templateImagePath"
+                      class="btn btn-secondary btn-sm"
+                      @click="openAutocratModal(evt)"
+                      title="Atur Posisi Teks Template (Autocrat)"
+                      style="border-color: rgba(235, 137, 91, 0.4); color: #fdb773;"
+                    >
+                      <Layers :size="14" />
+                      <span>Atur Posisi (Autocrat)</span>
+                    </button>
                     <button
                       class="btn btn-secondary btn-sm"
                       @click="openEditEventModal(evt)"
@@ -1251,6 +1487,9 @@ onMounted(() => {
                     @change="handleCoverFileChange"
                     class="form-input"
                   />
+                  <small class="form-hint" style="color: #6ee7b7;">
+                    🎨 <strong>Mode Citra Murni:</strong> Citra PNG yang diunggah akan dipertahankan desain visual aslinya 100% tanpa ditimpa teks, cukup disematkan bit LSB steganografi dan segel integritas SHA-256.
+                  </small>
                 </div>
 
                 <button type="submit" class="btn btn-primary" :disabled="isGenerating">
@@ -1496,6 +1735,18 @@ onMounted(() => {
             <small class="form-hint">Biarkan kosong jika tidak ingin mengubah template yang sudah ada.</small>
           </div>
 
+          <div v-if="editingEventForm.templateImagePath" class="form-group" style="margin-top: -6px; margin-bottom: 12px;">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm w-full"
+              @click="openAutocratModal(editingEventForm)"
+              style="border-color: rgba(235, 137, 91, 0.4); color: #fdb773;"
+            >
+              <Layers :size="14" />
+              <span>🎨 Buka Editor Posisi Teks Template (Autocrat)</span>
+            </button>
+          </div>
+
           <div v-if="editEventError" class="login-error-alert">
             <AlertTriangle :size="15" />
             <span>{{ editEventError }}</span>
@@ -1510,6 +1761,360 @@ onMounted(() => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Modal: Atur Posisi Teks Template (Autocrat Google Style) -->
+    <div v-if="showAutocratModal" class="modal-backdrop" @click="showAutocratModal = false">
+      <div class="modal-dialog glass-card autocrat-modal-dialog" @click.stop>
+        <div class="modal-header">
+          <div class="d-flex align-center gap-2">
+            <div class="badge-icon-box">
+              <Layers :size="20" style="color: #fdb773;" />
+            </div>
+            <div>
+              <h3 class="modal-title">Atur Posisi Citra Template (Autocrat)</h3>
+              <p class="modal-sub">
+                Geser (drag) kotak teks langsung di atas gambar template atau atur koordinat presisi.
+              </p>
+            </div>
+          </div>
+          <button class="close-btn" @click="showAutocratModal = false">&times;</button>
+        </div>
+
+        <div class="modal-body autocrat-modal-body">
+          <div v-if="autocratError" class="login-error-alert mb-3">
+            <AlertTriangle :size="16" />
+            <span>{{ autocratError }}</span>
+          </div>
+
+          <!-- Loading State -->
+          <div v-if="isLoadingAutocratImage" class="autocrat-loading-box">
+            <RefreshCw :size="28" class="spin-icon text-brand" />
+            <p>Memuat citra template sertifikat...</p>
+          </div>
+
+          <!-- Main Editor Grid -->
+          <div v-else class="autocrat-editor-grid">
+            <!-- Left Column: Visual Canvas Preview with Draggable Tags -->
+            <div class="autocrat-canvas-col">
+              <div class="autocrat-canvas-header">
+                <span class="canvas-title">Pratinjau Visual Template Sertifikat</span>
+                <span class="canvas-hint">💡 Geser kotak teks langsung pada gambar</span>
+              </div>
+
+              <div
+                ref="autocratCanvasRef"
+                class="autocrat-canvas-wrapper"
+                @click="handleCanvasClick"
+              >
+                <!-- Background Image Template -->
+                <img
+                  v-if="autocratImageSrc"
+                  :src="autocratImageSrc"
+                  alt="Template Sertifikat"
+                  class="autocrat-canvas-img"
+                />
+                <div v-else class="autocrat-no-img">
+                  <span>Tidak ada citra template. Silakan unggah terlebih dahulu di form event.</span>
+                </div>
+
+                <!-- Element 1: Nomor Sertifikat -->
+                <div
+                  v-if="autocratPositions.number && autocratPositions.number.show !== false"
+                  class="autocrat-tag"
+                  :class="{ active: activeAutocratElement === 'number' }"
+                  :style="{
+                    left: autocratPositions.number.x + '%',
+                    top: autocratPositions.number.y + '%',
+                    color: autocratPositions.number.color || '#333333',
+                    fontSize: Math.max(9, (autocratPositions.number.fontSize || 16) * 0.45) + 'px',
+                    textAlign: autocratPositions.number.align || 'left',
+                    transform: autocratPositions.number.align === 'left' ? 'translate(0, -50%)' : autocratPositions.number.align === 'right' ? 'translate(-100%, -50%)' : 'translate(-50%, -50%)'
+                  }"
+                  @mousedown="(e) => startTagDrag('number', e)"
+                  @touchstart="(e) => startTagDrag('number', e)"
+                  title="Nomor Sertifikat (Klik & Geser)"
+                >
+                  <span class="autocrat-tag-pill">🏷️ NOMOR SERTI</span>
+                  <div class="autocrat-tag-text font-mono">
+                    {{ (autocratPositions.number.prefix || '') + (autocratEvent?.nextCertificateNumber || (autocratEvent?.certificatePrefix ? autocratEvent.certificatePrefix + '001' : '041/HIMAPROSIF/XI/2026/001')) }}
+                  </div>
+                </div>
+
+                <!-- Element 2: Nama Peserta -->
+                <div
+                  v-if="autocratPositions.name && autocratPositions.name.show !== false"
+                  class="autocrat-tag"
+                  :class="{ active: activeAutocratElement === 'name' }"
+                  :style="{
+                    left: autocratPositions.name.x + '%',
+                    top: autocratPositions.name.y + '%',
+                    color: autocratPositions.name.color || '#A14646',
+                    fontSize: Math.max(12, (autocratPositions.name.fontSize || 46) * 0.45) + 'px',
+                    fontFamily: 'Georgia, serif',
+                    fontWeight: 'bold',
+                    textAlign: autocratPositions.name.align || 'center',
+                    transform: autocratPositions.name.align === 'left' ? 'translate(0, -50%)' : autocratPositions.name.align === 'right' ? 'translate(-100%, -50%)' : 'translate(-50%, -50%)'
+                  }"
+                  @mousedown="(e) => startTagDrag('name', e)"
+                  @touchstart="(e) => startTagDrag('name', e)"
+                  title="Nama Peserta (Klik & Geser)"
+                >
+                  <span class="autocrat-tag-pill">👤 NAMA PESERTA</span>
+                  <div class="autocrat-tag-text">
+                    {{ (autocratPositions.name.prefix || '') + 'Muhammad Raihan' }}
+                  </div>
+                </div>
+
+                <!-- Element 3: Sebagai Apa / Peran -->
+                <div
+                  v-if="autocratPositions.role && autocratPositions.role.show !== false"
+                  class="autocrat-tag"
+                  :class="{ active: activeAutocratElement === 'role' }"
+                  :style="{
+                    left: autocratPositions.role.x + '%',
+                    top: autocratPositions.role.y + '%',
+                    color: autocratPositions.role.color || '#DA6556',
+                    fontSize: Math.max(10, (autocratPositions.role.fontSize || 20) * 0.45) + 'px',
+                    fontWeight: '600',
+                    textAlign: autocratPositions.role.align || 'left',
+                    transform: autocratPositions.role.align === 'left' ? 'translate(0, -50%)' : autocratPositions.role.align === 'right' ? 'translate(-100%, -50%)' : 'translate(-50%, -50%)'
+                  }"
+                  @mousedown="(e) => startTagDrag('role', e)"
+                  @touchstart="(e) => startTagDrag('role', e)"
+                  title="Sebagai Apa / Peran (Klik & Geser)"
+                >
+                  <span class="autocrat-tag-pill">🎖️ SEBAGAI APA</span>
+                  <div class="autocrat-tag-text">
+                    {{ (autocratPositions.role.prefix || '') + 'Peserta' }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Presets Bar -->
+              <div class="autocrat-presets-bar">
+                <span class="preset-label">Preset Tata Letak:</span>
+                <button type="button" class="btn btn-secondary btn-xs" @click="applyUinPreset">
+                  <span>✨ Rekomendasi UIN / HIMA</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-xs" @click="applyCenterPreset">
+                  <span>🎯 Simetris Rata Tengah</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Right Column: Autocrat Precision Controls Panel -->
+            <div class="autocrat-controls-col glass-card">
+              <h4 class="ctrl-heading">Pengaturan Elemen Teks</h4>
+
+              <!-- Tab Selector Elemen -->
+              <div class="autocrat-tabs-row">
+                <button
+                  type="button"
+                  class="autocrat-tab-btn"
+                  :class="{ active: activeAutocratElement === 'name' }"
+                  @click="activeAutocratElement = 'name'"
+                >
+                  <span>👤 Nama</span>
+                </button>
+                <button
+                  type="button"
+                  class="autocrat-tab-btn"
+                  :class="{ active: activeAutocratElement === 'role' }"
+                  @click="activeAutocratElement = 'role'"
+                >
+                  <span>🎖️ Sebagai</span>
+                </button>
+                <button
+                  type="button"
+                  class="autocrat-tab-btn"
+                  :class="{ active: activeAutocratElement === 'number' }"
+                  @click="activeAutocratElement = 'number'"
+                >
+                  <span>🏷️ Nomor</span>
+                </button>
+              </div>
+
+              <!-- Active Element Settings -->
+              <div v-if="autocratPositions[activeAutocratElement]" class="autocrat-ctrl-body">
+                <!-- Toggle Show/Hide -->
+                <div class="ctrl-toggle-row mb-3">
+                  <label class="d-flex align-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      v-model="autocratPositions[activeAutocratElement].show"
+                      class="custom-chk"
+                    />
+                    <span class="font-medium text-sm">Tampilkan elemen ini di sertifikat</span>
+                  </label>
+                </div>
+
+                <!-- Prefix Text Input -->
+                <div class="form-group mb-3">
+                  <label class="form-label text-xs">
+                    Teks Awalan (Prefix)
+                    <span class="text-subtle font-normal">
+                      {{ activeAutocratElement === 'number' ? '(Contoh: "NOMOR: " atau kosongkan jika sudah ada di template)' : activeAutocratElement === 'role' ? '(Contoh: "Sebagai " atau kosongkan)' : '' }}
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    v-model="autocratPositions[activeAutocratElement].prefix"
+                    class="form-input form-input-sm"
+                    :placeholder="activeAutocratElement === 'number' ? 'NOMOR: ' : activeAutocratElement === 'role' ? 'Sebagai ' : ''"
+                  />
+                </div>
+
+                <!-- Position X (%) -->
+                <div class="form-group mb-3">
+                  <div class="d-flex justify-between align-center mb-1">
+                    <label class="form-label text-xs">Posisi Horizontal (X)</label>
+                    <span class="val-badge font-mono">{{ autocratPositions[activeAutocratElement].x }}%</span>
+                  </div>
+                  <div class="d-flex align-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      v-model.number="autocratPositions[activeAutocratElement].x"
+                      class="range-slider flex-1"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      v-model.number="autocratPositions[activeAutocratElement].x"
+                      class="form-input form-input-sm font-mono num-box"
+                    />
+                  </div>
+                </div>
+
+                <!-- Position Y (%) -->
+                <div class="form-group mb-3">
+                  <div class="d-flex justify-between align-center mb-1">
+                    <label class="form-label text-xs">Posisi Vertikal (Y)</label>
+                    <span class="val-badge font-mono">{{ autocratPositions[activeAutocratElement].y }}%</span>
+                  </div>
+                  <div class="d-flex align-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      v-model.number="autocratPositions[activeAutocratElement].y"
+                      class="range-slider flex-1"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      v-model.number="autocratPositions[activeAutocratElement].y"
+                      class="form-input form-input-sm font-mono num-box"
+                    />
+                  </div>
+                </div>
+
+                <!-- Font Size -->
+                <div class="form-group mb-3">
+                  <div class="d-flex justify-between align-center mb-1">
+                    <label class="form-label text-xs">Ukuran Font Dasar</label>
+                    <span class="val-badge font-mono">{{ autocratPositions[activeAutocratElement].fontSize }} px</span>
+                  </div>
+                  <div class="d-flex align-center gap-2">
+                    <input
+                      type="range"
+                      min="10"
+                      max="80"
+                      step="1"
+                      v-model.number="autocratPositions[activeAutocratElement].fontSize"
+                      class="range-slider flex-1"
+                    />
+                    <input
+                      type="number"
+                      min="10"
+                      max="80"
+                      step="1"
+                      v-model.number="autocratPositions[activeAutocratElement].fontSize"
+                      class="form-input form-input-sm font-mono num-box"
+                    />
+                  </div>
+                </div>
+
+                <!-- Alignment & Color -->
+                <div class="grid-2-col-sm mb-3">
+                  <div>
+                    <label class="form-label text-xs mb-1">Perataan (Align)</label>
+                    <div class="align-btn-group">
+                      <button
+                        type="button"
+                        class="align-btn"
+                        :class="{ active: autocratPositions[activeAutocratElement].align === 'left' }"
+                        @click="autocratPositions[activeAutocratElement].align = 'left'"
+                        title="Rata Kiri"
+                      >
+                        <AlignLeft :size="14" />
+                      </button>
+                      <button
+                        type="button"
+                        class="align-btn"
+                        :class="{ active: autocratPositions[activeAutocratElement].align === 'center' }"
+                        @click="autocratPositions[activeAutocratElement].align = 'center'"
+                        title="Rata Tengah"
+                      >
+                        <AlignCenter :size="14" />
+                      </button>
+                      <button
+                        type="button"
+                        class="align-btn"
+                        :class="{ active: autocratPositions[activeAutocratElement].align === 'right' }"
+                        @click="autocratPositions[activeAutocratElement].align = 'right'"
+                        title="Rata Kanan"
+                      >
+                        <AlignRight :size="14" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="form-label text-xs mb-1">Warna Teks</label>
+                    <div class="color-picker-box">
+                      <input
+                        type="color"
+                        v-model="autocratPositions[activeAutocratElement].color"
+                        class="color-input"
+                      />
+                      <input
+                        type="text"
+                        v-model="autocratPositions[activeAutocratElement].color"
+                        class="form-input form-input-sm font-mono hex-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="showAutocratModal = false">
+            Batal
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="isSavingAutocrat"
+            @click="handleSaveAutocratPositions"
+          >
+            <RefreshCw v-if="isSavingAutocrat" :size="16" class="spin-icon" />
+            <CheckCircle2 v-else :size="16" />
+            <span>{{ isSavingAutocrat ? 'Menyimpan Posisi...' : 'Simpan Posisi Template' }}</span>
+          </button>
+        </div>
       </div>
     </div>
 

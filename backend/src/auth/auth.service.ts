@@ -8,7 +8,7 @@ import {
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../database/prisma.service';
-import { User } from '@prisma/client';
+import type { User } from '@prisma/client';
 
 interface LoginAttempt {
   count: number;

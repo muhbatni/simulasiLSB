@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -52,6 +53,23 @@ export class EventsController {
   @Get(':id')
   getOne(@Param('id') id: string) {
     return this.eventsService.getEventById(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/template-image')
+  async getTemplateImage(@Param('id') id: string, @Res() res: Response) {
+    const evt = await this.eventsService.getEventById(id);
+    if (!evt.templateImagePath) {
+      throw new NotFoundException('Event ini tidak memiliki template citra');
+    }
+    const templatePath = path.join(process.cwd(), 'uploads', 'covers', evt.templateImagePath);
+    if (!fs.existsSync(templatePath)) {
+      throw new NotFoundException('Berkas template citra tidak ditemukan di server');
+    }
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-cache');
+    const stream = fs.createReadStream(templatePath);
+    stream.pipe(res);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -121,8 +139,20 @@ export class EventsController {
       organizer: body.organizer,
       certificatePrefix: certPrefix,
       templateImagePath,
+      templatePositions: body.templatePositions,
       createdBy: req.user?.sub || 'admin',
     });
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Patch(':id/template-positions')
+  async updateTemplatePositions(
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    const positions = body.templatePositions !== undefined ? body.templatePositions : body;
+    return this.eventsService.updateTemplatePositions(id, positions);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -39,6 +39,9 @@ export class CreateEventDto {
     message: "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
   })
   certificatePrefix!: string;
+
+  @IsOptional()
+  templatePositions?: any;
 }
 
 export class UpdateEventDto {
@@ -74,6 +77,9 @@ export class UpdateEventDto {
     message: "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
   })
   certificatePrefix?: string;
+
+  @IsOptional()
+  templatePositions?: any;
 }
 
 export class CreateRecipientDto {

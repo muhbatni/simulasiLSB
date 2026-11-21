@@ -12,6 +12,22 @@ export interface CertificateDesignParams {
   height?: number; // 1080 atau 1754
 }
 
+export interface TemplateElementPosition {
+  x: number; // Persentase horizontal 0-100%
+  y: number; // Persentase vertikal 0-100%
+  fontSize?: number; // Ukuran font dasar dalam px
+  color?: string; // Warna teks HEX, contoh #A14646
+  align?: 'left' | 'center' | 'right';
+  prefix?: string; // Awalan teks opsional (contoh: 'NOMOR: ' atau 'Sebagai ')
+  show?: boolean; // Tampilkan atau sembunyikan
+}
+
+export interface TemplatePositionsConfig {
+  number?: TemplateElementPosition;
+  name?: TemplateElementPosition;
+  role?: TemplateElementPosition;
+}
+
 @Injectable()
 export class CertificateGeneratorService {
   /**
@@ -152,44 +168,103 @@ export class CertificateGeneratorService {
 
   /**
    * Menimpa (overlay) teks nama penerima, nomor, dan peran pada template PNG
+   * Mendukung kustomisasi posisi dinamis ala Autocrat Google
    */
   async overlayTextOnTemplate(
     templateBuffer: Buffer,
     params: CertificateDesignParams,
+    positions?: TemplatePositionsConfig | null,
   ): Promise<Buffer> {
     const meta = await sharp(templateBuffer).metadata();
     const width = meta.width || 1920;
     const height = meta.height || 1080;
     const scale = width / 1920;
 
-    // Layer SVG teks transparan di atas template
-    const textSvg = `
-    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-      <!-- Certificate Number -->
-      <text x="${width / 2}" y="${290 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="600" fill="#444444" letter-spacing="${2 * scale}">
-        NOMOR: ${this.escapeXml(params.nomor)}
-      </text>
+    let elementsSvg = '';
 
-      <!-- Recipient Name -->
-      <g transform="translate(${width / 2}, ${445 * scale})">
-        <text text-anchor="middle" font-family="'Georgia', serif" font-weight="bold" font-size="${50 * scale}" fill="#A14646">
+    if (positions && (positions.name || positions.role || positions.number)) {
+      // 1. Nomor Sertifikat
+      if (positions.number && positions.number.show !== false) {
+        const numP = positions.number;
+        const x = (numP.x / 100) * width;
+        const y = (numP.y / 100) * height;
+        const fSize = (numP.fontSize || 16) * scale;
+        const color = numP.color || '#444444';
+        const anchor = numP.align === 'left' ? 'start' : numP.align === 'right' ? 'end' : 'middle';
+        const prefix = numP.prefix !== undefined ? numP.prefix : '';
+        const fullText = prefix + params.nomor;
+        elementsSvg += `
+        <text x="${x}" y="${y}" text-anchor="${anchor}" font-family="'Segoe UI', Roboto, 'Helvetica Neue', sans-serif" font-size="${fSize}" font-weight="600" fill="${color}">
+          ${this.escapeXml(fullText)}
+        </text>
+        `;
+      }
+
+      // 2. Nama Peserta
+      if (positions.name && positions.name.show !== false) {
+        const nameP = positions.name;
+        const x = (nameP.x / 100) * width;
+        const y = (nameP.y / 100) * height;
+        const fSize = (nameP.fontSize || 48) * scale;
+        const color = nameP.color || '#A14646';
+        const anchor = nameP.align === 'left' ? 'start' : nameP.align === 'right' ? 'end' : 'middle';
+        elementsSvg += `
+        <text x="${x}" y="${y}" text-anchor="${anchor}" font-family="'Georgia', serif" font-weight="bold" font-size="${fSize}" fill="${color}">
           ${this.escapeXml(params.nama)}
         </text>
-        <line x1="${-300 * scale}" y1="${20 * scale}" x2="${300 * scale}" y2="${20 * scale}" stroke="#DA6556" stroke-width="${2 * scale}" />
-      </g>
+        `;
+      }
 
-      <!-- Role & Details -->
-      <g transform="translate(${width / 2}, ${530 * scale})">
-        <text text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${22 * scale}" fill="#333333">
-          Sebagai <tspan font-weight="bold" fill="#DA6556">${this.escapeXml(params.peran)}</tspan>
+      // 3. Sebagai Apa (Peran)
+      if (positions.role && positions.role.show !== false) {
+        const roleP = positions.role;
+        const x = (roleP.x / 100) * width;
+        const y = (roleP.y / 100) * height;
+        const fSize = (roleP.fontSize || 22) * scale;
+        const color = roleP.color || '#DA6556';
+        const anchor = roleP.align === 'left' ? 'start' : roleP.align === 'right' ? 'end' : 'middle';
+        const prefix = roleP.prefix !== undefined ? roleP.prefix : '';
+        const fullText = prefix + params.peran;
+        elementsSvg += `
+        <text x="${x}" y="${y}" text-anchor="${anchor}" font-family="'Segoe UI', Roboto, 'Helvetica Neue', sans-serif" font-weight="600" font-size="${fSize}" fill="${color}">
+          ${this.escapeXml(fullText)}
         </text>
-        <text y="${40 * scale}" text-anchor="middle" font-family="'Georgia', serif" font-weight="bold" font-size="${28 * scale}" fill="#222222">
-          ${this.escapeXml(params.kegiatan)}
+        `;
+      }
+    } else {
+      // Fallback layout bawaan jika template posisi belum disetel
+      elementsSvg = `
+        <!-- Certificate Number -->
+        <text x="${width / 2}" y="${290 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${16 * scale}" font-weight="600" fill="#444444" letter-spacing="${2 * scale}">
+          NOMOR: ${this.escapeXml(params.nomor)}
         </text>
-        <text y="${80 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${17 * scale}" fill="#666666">
-          ${this.escapeXml(params.tanggal)} &#8226; ${this.escapeXml(params.lembaga)}
-        </text>
-      </g>
+
+        <!-- Recipient Name -->
+        <g transform="translate(${width / 2}, ${445 * scale})">
+          <text text-anchor="middle" font-family="'Georgia', serif" font-weight="bold" font-size="${50 * scale}" fill="#A14646">
+            ${this.escapeXml(params.nama)}
+          </text>
+          <line x1="${-300 * scale}" y1="${20 * scale}" x2="${300 * scale}" y2="${20 * scale}" stroke="#DA6556" stroke-width="${2 * scale}" />
+        </g>
+
+        <!-- Role & Details -->
+        <g transform="translate(${width / 2}, ${530 * scale})">
+          <text text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${22 * scale}" fill="#333333">
+            Sebagai <tspan font-weight="bold" fill="#DA6556">${this.escapeXml(params.peran)}</tspan>
+          </text>
+          <text y="${40 * scale}" text-anchor="middle" font-family="'Georgia', serif" font-weight="bold" font-size="${28 * scale}" fill="#222222">
+            ${this.escapeXml(params.kegiatan)}
+          </text>
+          <text y="${80 * scale}" text-anchor="middle" font-family="'Segoe UI', Roboto, sans-serif" font-size="${17 * scale}" fill="#666666">
+            ${this.escapeXml(params.tanggal)} &#8226; ${this.escapeXml(params.lembaga)}
+          </text>
+        </g>
+      `;
+    }
+
+    const textSvg = `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      ${elementsSvg}
     </svg>
     `;
 

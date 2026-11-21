@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { Event, Certificate } from '@prisma/client';
+import type { Event, Certificate } from '@prisma/client';
 import { CreateEventDto, UpdateEventDto, CreateRecipientDto } from './dto/event.dto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -87,6 +87,13 @@ export class EventsService {
       );
     }
 
+    let positions = null;
+    if (data.templatePositions) {
+      positions = typeof data.templatePositions === 'string'
+        ? JSON.parse(data.templatePositions)
+        : data.templatePositions;
+    }
+
     return this.prisma.event.create({
       data: {
         eventName: data.eventName.trim(),
@@ -96,6 +103,7 @@ export class EventsService {
         organizer: data.organizer.trim(),
         certificatePrefix: certPrefix,
         templateImagePath: data.templateImagePath,
+        templatePositions: positions,
         createdBy: data.createdBy,
       },
     });
@@ -114,6 +122,17 @@ export class EventsService {
         throw new BadRequestException(
           "Format nomor sertifikat harus diakhiri dengan tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)",
         );
+      }
+    }
+
+    let parsedPositions = undefined;
+    if (data.templatePositions !== undefined) {
+      if (data.templatePositions === null) {
+        parsedPositions = null;
+      } else {
+        parsedPositions = typeof data.templatePositions === 'string'
+          ? JSON.parse(data.templatePositions)
+          : data.templatePositions;
       }
     }
 
@@ -140,6 +159,18 @@ export class EventsService {
         ...(data.organizer !== undefined && { organizer: data.organizer.trim() }),
         ...(data.certificatePrefix !== undefined && { certificatePrefix: data.certificatePrefix.trim() }),
         ...(data.templateImagePath !== undefined && { templateImagePath: data.templateImagePath }),
+        ...(parsedPositions !== undefined && { templatePositions: parsedPositions }),
+      },
+    });
+  }
+
+  async updateTemplatePositions(id: string, positions: any): Promise<Event> {
+    await this.getEventById(id);
+    const parsed = typeof positions === 'string' ? JSON.parse(positions) : positions;
+    return this.prisma.event.update({
+      where: { id },
+      data: {
+        templatePositions: parsed,
       },
     });
   }

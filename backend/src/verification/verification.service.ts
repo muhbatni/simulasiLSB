@@ -4,7 +4,8 @@ import {
   LsbSteganoService,
   VerificationResult,
 } from '../security/lsb-stego.service';
-import { VerificationLog, VerificationStatus } from '@prisma/client';
+import type { VerificationLog } from '@prisma/client';
+import { VerificationStatus } from '@prisma/client';
 
 @Injectable()
 export class VerificationService {

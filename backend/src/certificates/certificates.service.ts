@@ -6,10 +6,11 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-const archiver = require('archiver');
+import sharp from 'sharp';
+import { ZipArchive } from 'archiver';
 import { Response } from 'express';
 import { PrismaService } from '../database/prisma.service';
-import { Certificate, Event } from '@prisma/client';
+import type { Certificate, Event } from '@prisma/client';
 import {
   LsbSteganoService,
   CertificateMetadata,
@@ -277,12 +278,21 @@ export class CertificatesService {
     // Siapkan Citra Cover
     let coverBuffer: Buffer;
     if (customCoverBuffer) {
-      coverBuffer = await this.certGenerator.overlayTextOnTemplate(customCoverBuffer, designParams);
+      // PERMINTAAN 2: Pada penerbitan cepat dengan custom template, citra PNG asli tidak diubah/ditimpa teks
+      // Murni disematkan bit LSB steganografi dan segel kriptografi SHA-256
+      coverBuffer = await sharp(customCoverBuffer)
+        .png({ compressionLevel: 9, palette: false })
+        .toBuffer();
     } else if (event.templateImagePath) {
       const templatePath = path.join(process.cwd(), 'uploads', 'covers', event.templateImagePath);
       if (fs.existsSync(templatePath)) {
         const rawTemplate = fs.readFileSync(templatePath);
-        coverBuffer = await this.certGenerator.overlayTextOnTemplate(rawTemplate, designParams);
+        // PERMINTAAN 1: Terapkan konfigurasi posisi dinamis ala Autocrat Google
+        coverBuffer = await this.certGenerator.overlayTextOnTemplate(
+          rawTemplate,
+          designParams,
+          (event as any).templatePositions,
+        );
       } else {
         coverBuffer = await this.certGenerator.generateCertificateImage(designParams);
       }
@@ -462,7 +472,7 @@ export class CertificatesService {
       `attachment; filename="E-Sertifikat-UINSA-${Date.now()}.zip"`,
     );
 
-    const archive = archiver('zip', {
+    const archive = new ZipArchive({
       store: true, // Lossless store tanpa re-kompresi DEFLATE
     });
 
