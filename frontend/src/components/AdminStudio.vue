@@ -340,6 +340,18 @@ const handleAddRecipient = async () => {
 }
 
 // F-05: CSV Import with Preview
+const handleDownloadCsvTemplate = () => {
+  const csvContent = "nama,nim,peran\nAhmad Fulan,09020623001,Peserta\nSiti Nurhaliza,09020623002,Pemateri\nRaihan Maulana,09020623003,Panitia\n"
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.setAttribute('download', 'template_penerima_sertifikat.csv')
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(link.href)
+}
+
 const handleCsvFileChange = (e) => {
   csvFile.value = e.target.files[0]
 }
@@ -1276,10 +1288,15 @@ onUnmounted(() => {
               </div>
 
               <div class="recipients-actions">
-                <a href="/api/events/recipients/template-csv" download class="btn btn-secondary btn-sm">
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  @click="handleDownloadCsvTemplate"
+                  title="Unduh Templat CSV Penerima (Format: nama, nim, peran)"
+                >
                   <Download :size="14" />
                   <span>Unduh Templat CSV</span>
-                </a>
+                </button>
                 <button class="btn btn-secondary btn-sm" @click="showCsvImportModal = true">
                   <FileSpreadsheet :size="14" />
                   <span>Impor CSV</span>
@@ -2533,16 +2550,34 @@ onUnmounted(() => {
           <button type="button" class="close-btn" @click="showCsvImportModal = false" title="Tutup Modal (Esc)">&times;</button>
         </div>
         <div class="modal-body">
-          <p class="pane-sub">Unggah berkas CSV atau tempel teks data penerima (Maks. 500 baris).</p>
+          <p class="pane-sub">
+            Unggah berkas CSV atau tempel teks data penerima. Cukup kolom <strong>nama, nim, peran</strong> karena nomor sertifikat otomatis digenerate dari format agenda kegiatan.
+          </p>
 
           <div class="form-group">
-            <label class="form-label">Pilih Berkas CSV:</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label class="form-label" style="margin-bottom: 0;">Pilih Berkas CSV:</label>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                @click="handleDownloadCsvTemplate"
+                style="font-size: 0.76rem; padding: 3px 10px; border-color: rgba(253, 183, 115, 0.4); color: #fdb773;"
+              >
+                <Download :size="12" />
+                <span>Unduh Contoh CSV</span>
+              </button>
+            </div>
             <input type="file" accept=".csv,text/csv" @change="handleCsvFileChange" class="form-input" />
           </div>
 
           <div class="form-group">
-            <label class="form-label">Atau Tempel Teks CSV (Format: nomor_sertifikat,nama,nim_email,peran):</label>
-            <textarea v-model="csvTextInput" rows="5" class="form-textarea font-mono"></textarea>
+            <label class="form-label">Atau Tempel Teks CSV (Format: nama,nim,peran):</label>
+            <textarea
+              v-model="csvTextInput"
+              rows="5"
+              class="form-textarea font-mono"
+              placeholder="nama,nim,peran&#10;Ahmad Fulan,09020623001,Peserta&#10;Siti Nurhaliza,09020623002,Pemateri&#10;Raihan Maulana,09020623003,Panitia"
+            ></textarea>
           </div>
 
           <div class="btn-group" style="margin-bottom: 15px;">
@@ -2567,18 +2602,20 @@ onUnmounted(() => {
                 <thead>
                   <tr>
                     <th>Baris</th>
-                    <th>Nomor</th>
+                    <th>Nomor (Otomatis)</th>
                     <th>Nama</th>
-                    <th>NIM/ID</th>
+                    <th>NIM / ID</th>
+                    <th>Peran</th>
                     <th>Status Baris</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="row in csvPreviewData.rows" :key="row.rowNumber">
                     <td class="font-mono">{{ row.rowNumber }}</td>
-                    <td class="font-mono">{{ row.certificateNumber }}</td>
+                    <td class="font-mono text-gold">{{ row.certificateNumber }}</td>
                     <td>{{ row.recipientName }}</td>
                     <td class="font-mono">{{ row.recipientIdentifier }}</td>
+                    <td><span class="badge badge-brand">{{ row.recipientRole }}</span></td>
                     <td>
                       <span v-if="row.isValid" class="text-emerald font-bold">&check; Valid</span>
                       <span v-else class="text-danger font-bold">&cross; {{ row.errorMessage }}</span>

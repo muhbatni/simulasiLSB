@@ -359,19 +359,29 @@ export class EventsService {
 
     if (
       firstLine.includes('nama') ||
-      firstLine.includes('nomor_sertifikat') ||
-      firstLine.includes('nim')
+      firstLine.includes('nim') ||
+      firstLine.includes('peran') ||
+      firstLine.includes('nomor')
     ) {
       hasHeader = true;
-      const headers = parseCsvLine(firstLine).map((h) => h.toLowerCase());
-      colCertNumIdx = headers.indexOf('nomor_sertifikat');
-      colNameIdx = headers.indexOf('nama');
-      colIdIdx = headers.indexOf('nim_email');
-      if (colIdIdx === -1) colIdIdx = headers.indexOf('nim');
-      colRoleIdx = headers.indexOf('peran');
+      const headers = parseCsvLine(firstLine).map((h) =>
+        h.toLowerCase().trim().replace(/^["']|["']$/g, ''),
+      );
+      colCertNumIdx = headers.findIndex(
+        (h) => h === 'nomor_sertifikat' || h === 'no_sertifikat' || h === 'nomor' || h === 'no',
+      );
+      colNameIdx = headers.findIndex(
+        (h) => h === 'nama' || h === 'nama_lengkap' || h === 'name' || h === 'nama penerima',
+      );
+      colIdIdx = headers.findIndex(
+        (h) => h === 'nim' || h === 'nim_email' || h === 'nim/email' || h === 'identifier' || h === 'nim / id',
+      );
+      colRoleIdx = headers.findIndex(
+        (h) => h === 'peran' || h === 'role' || h === 'sebagai',
+      );
       if (colNameIdx === -1 || colIdIdx === -1) {
         throw new BadRequestException(
-          'Header CSV tidak valid. Wajib memiliki kolom: nama, nim_email (atau nim)',
+          'Header CSV tidak valid. Wajib memiliki kolom: nama, nim (contoh: nama,nim,peran)',
         );
       }
     }
@@ -386,6 +396,11 @@ export class EventsService {
       existingCerts.map((c) => c.certificateNumber.toLowerCase()),
     );
 
+    const eventCertCount = await this.prisma.certificate.count({
+      where: { eventId },
+    });
+    let seqCounter = eventCertCount + 1;
+
     let rowNum = hasHeader ? 2 : 1;
 
     for (const line of dataLines) {
@@ -397,19 +412,21 @@ export class EventsService {
       let certNum = '';
 
       if (!rawCertNum) {
-        let seq = usedCertNumbers.size + 1;
-        certNum = `${eventPrefix}${String(seq).padStart(3, '0')}`;
-        while (usedCertNumbers.has(certNum.toLowerCase())) {
-          seq++;
-          certNum = `${eventPrefix}${String(seq).padStart(3, '0')}`;
+        let candidate = `${eventPrefix}${String(seqCounter).padStart(3, '0')}`;
+        while (usedCertNumbers.has(candidate.toLowerCase())) {
+          seqCounter++;
+          candidate = `${eventPrefix}${String(seqCounter).padStart(3, '0')}`;
         }
+        certNum = candidate;
+        seqCounter++;
       } else if (rawCertNum.endsWith('/')) {
-        let seq = usedCertNumbers.size + 1;
-        certNum = `${rawCertNum}${String(seq).padStart(3, '0')}`;
-        while (usedCertNumbers.has(certNum.toLowerCase())) {
-          seq++;
-          certNum = `${rawCertNum}${String(seq).padStart(3, '0')}`;
+        let candidate = `${rawCertNum}${String(seqCounter).padStart(3, '0')}`;
+        while (usedCertNumbers.has(candidate.toLowerCase())) {
+          seqCounter++;
+          candidate = `${rawCertNum}${String(seqCounter).padStart(3, '0')}`;
         }
+        certNum = candidate;
+        seqCounter++;
       } else {
         certNum = rawCertNum;
       }
@@ -479,6 +496,6 @@ export class EventsService {
   }
 
   getCsvTemplate(): string {
-    return 'nomor_sertifikat,nama,nim_email,peran\n041/HIMAPROSIF/XI/2026/001,Ahmad Fulan,09020623001,Peserta\n041/HIMAPROSIF/XI/2026/002,Siti Nurhaliza,09020623002,Pemateri';
+    return 'nama,nim,peran\nAhmad Fulan,09020623001,Peserta\nSiti Nurhaliza,09020623002,Pemateri\nRaihan Maulana,09020623003,Panitia';
   }
 }

@@ -41,12 +41,10 @@ export class EventsController {
     return this.eventsService.getAllEvents();
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
   @Get('recipients/template-csv')
   downloadCsvTemplate(@Res() res: Response) {
     const csv = this.eventsService.getCsvTemplate();
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="template_penerima_sertifikat.csv"');
     res.send(csv);
   }
