@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -33,9 +34,8 @@ export class EventsController {
 
   @UseGuards(JwtAuthGuard)
   @Get()
-  getAll(@Request() req: any) {
-    const onlyActive = req.user?.role !== 'admin';
-    return this.eventsService.getAllEvents(onlyActive);
+  getAll() {
+    return this.eventsService.getAllEvents();
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -111,8 +111,51 @@ export class EventsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: UpdateEventDto) {
-    return this.eventsService.updateEvent(id, body);
+  @Put(':id')
+  @UseInterceptors(
+    FileInterceptor('templateImage', {
+      limits: { fileSize: 10 * 1024 * 1024 }, // Maksimal 10 MB
+      fileFilter: (req, file, cb) => {
+        if (file) {
+          const ext = path.extname(file.originalname).toLowerCase();
+          if (ext !== '.png' && file.mimetype !== 'image/png') {
+            return cb(
+              new BadRequestException('Hanya format PNG yang didukung'),
+              false,
+            );
+          }
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async update(
+    @Param('id') id: string,
+    @Body() body: UpdateEventDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    let templateImagePath: string | undefined = undefined;
+
+    if (file) {
+      if (!this.lsbService.isPng(file.buffer)) {
+        throw new BadRequestException('Berkas bukan berkas PNG valid (magic bytes mismatch)');
+      }
+
+      const safeBasename = path.basename(file.originalname).replace(/[^a-zA-Z0-9.-]/g, '_');
+      const fileName = `template-${Date.now()}-${safeBasename}`;
+      const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+      if (!fs.existsSync(coversDir)) {
+        fs.mkdirSync(coversDir, { recursive: true });
+      }
+      const filePath = path.join(coversDir, fileName);
+      fs.writeFileSync(filePath, file.buffer);
+      templateImagePath = fileName;
+    }
+
+    return this.eventsService.updateEvent(id, {
+      ...body,
+      ...(templateImagePath ? { templateImagePath } : {}),
+    });
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

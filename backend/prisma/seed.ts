@@ -58,7 +58,6 @@ async function main() {
       eventName: 'Seminar Nasional AI & Keamanan Informasi Digital 2026',
       eventDate: '2026-10-16',
       organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
-      isActive: true,
       createdBy: admin.id,
     },
   });
@@ -71,7 +70,6 @@ async function main() {
       eventName: 'Workshop Fullstack Modern NestJS & Vue.js 3',
       eventDate: '2026-10-18',
       organizer: 'Himpunan Mahasiswa Program Studi Sistem Informasi (HIMAPROSIF) UINSA',
-      isActive: true,
       createdBy: himasi.id,
     },
   });
@@ -84,7 +82,6 @@ async function main() {
       eventName: 'Pelatihan Keamanan Siber: LSB Steganography & SHA-256',
       eventDate: '2026-10-20',
       organizer: 'Laboratorium Rekayasa Perangkat Lunak & Siber FST UINSA',
-      isActive: true,
       createdBy: admin.id,
     },
   });

@@ -6,6 +6,8 @@ import {
 import { PrismaService } from '../database/prisma.service';
 import { Event, Certificate } from '@prisma/client';
 import { CreateEventDto, UpdateEventDto, CreateRecipientDto } from './dto/event.dto';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface CsvImportRow {
   rowNumber: number;
@@ -21,9 +23,8 @@ export interface CsvImportRow {
 export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getAllEvents(onlyActive = false): Promise<any[]> {
+  async getAllEvents(): Promise<any[]> {
     const events = await this.prisma.event.findMany({
-      where: onlyActive ? { isActive: true } : undefined,
       include: {
         _count: {
           select: {
@@ -75,14 +76,29 @@ export class EventsService {
         eventDate: data.eventDate.trim(),
         organizer: data.organizer.trim(),
         templateImagePath: data.templateImagePath,
-        isActive: true,
         createdBy: data.createdBy,
       },
     });
   }
 
-  async updateEvent(id: string, data: UpdateEventDto): Promise<Event> {
-    await this.getEventById(id);
+  async updateEvent(
+    id: string,
+    data: UpdateEventDto & { templateImagePath?: string },
+  ): Promise<Event> {
+    const existing = await this.getEventById(id);
+
+    // Jika template baru diunggah dan template lama ada, hapus file template lama
+    if (data.templateImagePath && existing.templateImagePath) {
+      const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+      const oldPath = path.join(coversDir, existing.templateImagePath);
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.unlinkSync(oldPath);
+        } catch (err) {
+          console.warn(`Gagal menghapus file template lama: ${oldPath}`, err);
+        }
+      }
+    }
 
     return this.prisma.event.update({
       where: { id },
@@ -90,30 +106,61 @@ export class EventsService {
         ...(data.eventName !== undefined && { eventName: data.eventName.trim() }),
         ...(data.eventDate !== undefined && { eventDate: data.eventDate.trim() }),
         ...(data.organizer !== undefined && { organizer: data.organizer.trim() }),
-        ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.templateImagePath !== undefined && { templateImagePath: data.templateImagePath }),
       },
     });
   }
 
   async deleteEvent(id: string): Promise<boolean> {
-    await this.getEventById(id);
+    const evt = await this.getEventById(id);
 
-    // Event yang sudah memiliki sertifikat terbit tidak boleh dihapus, hanya dinonaktifkan
-    const issuedCount = await this.prisma.certificate.count({
-      where: { eventId: id, status: 'TERBIT' },
-    });
-
-    if (issuedCount > 0) {
-      throw new BadRequestException(
-        `Event yang sudah memiliki sertifikat terbit (${issuedCount} berkas) tidak dapat dihapus, hanya dapat dinonaktifkan.`,
-      );
+    // Hapus file template jika ada
+    if (evt.templateImagePath) {
+      const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+      const filePath = path.join(coversDir, evt.templateImagePath);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (err) {
+          console.warn(`Gagal menghapus file template: ${filePath}`, err);
+        }
+      }
     }
 
-    // Hapus calon penerima belum terbit dan event
-    await this.prisma.certificate.deleteMany({
-      where: { eventId: id, status: 'BELUM_TERBIT' },
+    // Bersihkan file stego dan cover sertifikat jika ada di disk
+    const certs = await this.prisma.certificate.findMany({
+      where: { eventId: id },
+      select: { stegoImagePath: true, coverImagePath: true },
     });
 
+    const certDir = path.join(process.cwd(), 'uploads', 'certificates');
+    const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+
+    for (const cert of certs) {
+      if (cert.stegoImagePath) {
+        const p = path.join(certDir, cert.stegoImagePath);
+        if (fs.existsSync(p)) {
+          try {
+            fs.unlinkSync(p);
+          } catch {}
+        }
+      }
+      if (cert.coverImagePath) {
+        const p = path.join(coversDir, cert.coverImagePath);
+        if (fs.existsSync(p)) {
+          try {
+            fs.unlinkSync(p);
+          } catch {}
+        }
+      }
+    }
+
+    // Hapus seluruh sertifikat terkait event
+    await this.prisma.certificate.deleteMany({
+      where: { eventId: id },
+    });
+
+    // Hapus event
     await this.prisma.event.delete({
       where: { id },
     });

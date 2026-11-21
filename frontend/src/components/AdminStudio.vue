@@ -28,7 +28,7 @@ import {
   CheckSquare,
   Square,
   Archive,
-  Power
+  Pencil
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -393,28 +393,74 @@ const handleCreateEvent = async () => {
   }
 }
 
-const handleToggleEventActive = async (event) => {
+// Edit Event State (CRUD Event: Update)
+const showEditEventModal = ref(false)
+const editingEventForm = ref({
+  id: '',
+  eventName: '',
+  eventDate: '',
+  organizer: '',
+})
+const editEventTemplate = ref(null)
+const isUpdatingEvent = ref(false)
+const editEventError = ref('')
+
+const openEditEventModal = (event) => {
+  editingEventForm.value = {
+    id: event.id,
+    eventName: event.eventName || '',
+    eventDate: event.eventDate || '',
+    organizer: event.organizer || '',
+  }
+  editEventTemplate.value = null
+  editEventError.value = ''
+  showEditEventModal.value = true
+}
+
+const handleUpdateEvent = async () => {
+  if (!editingEventForm.value.eventName) return
+  isUpdatingEvent.value = true
+  editEventError.value = ''
+
   try {
-    await api.patch(
-      `/events/${event.id}`,
-      { isActive: !event.isActive }
-    )
+    const formData = new FormData()
+    formData.append('eventName', editingEventForm.value.eventName)
+    formData.append('eventDate', editingEventForm.value.eventDate)
+    formData.append('organizer', editingEventForm.value.organizer)
+
+    if (editEventTemplate.value) {
+      formData.append('templateImage', editEventTemplate.value)
+    }
+
+    await api.patch(`/events/${editingEventForm.value.id}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+
+    showEditEventModal.value = false
     await loadDashboardData()
+    alert('Agenda kegiatan berhasil diperbarui!')
   } catch (err) {
-    alert(err.response?.data?.message || 'Gagal mengubah status event')
+    editEventError.value = err.response?.data?.message || 'Gagal memperbarui agenda kegiatan'
+  } finally {
+    isUpdatingEvent.value = false
   }
 }
 
 const handleDeleteEvent = async (event) => {
-  const confirmMsg = `Yakin ingin menghapus agenda '${event.eventName}'?`
+  const confirmMsg = `Yakin ingin menghapus agenda '${event.eventName}'? Seluruh data sertifikat dan penerima terkait akan ikut terhapus.`
   if (!confirm(confirmMsg)) return
 
   try {
     await api.delete(`/events/${event.id}`)
+    if (selectedEventId.value === event.id) {
+      selectedEventId.value = ''
+    }
     await loadDashboardData()
     alert('Agenda berhasil dihapus.')
   } catch (err) {
-    alert(err.response?.data?.message || 'Event yang sudah memiliki sertifikat terbit tidak dapat dihapus, hanya dapat dinonaktifkan.')
+    alert(err.response?.data?.message || 'Gagal menghapus event.')
   }
 }
 
@@ -930,16 +976,15 @@ onMounted(() => {
             <!-- Events List -->
             <div class="glass-card pane-card">
               <h3 class="pane-title">Daftar Agenda Kegiatan Terdaftar</h3>
-              <p class="pane-sub">Event dengan sertifikat terbit dilindungi dari penghapusan permanen (hanya dinonaktifkan).</p>
+              <p class="pane-sub">Kelola, sunting, dan hapus agenda kegiatan e-sertifikat.</p>
 
               <div class="events-list">
                 <div v-for="evt in events" :key="evt.id" class="event-item glass-card">
                   <div class="e-info">
                     <div class="e-badge-row">
-                      <span class="badge" :class="evt.isActive !== false ? 'badge-valid' : 'badge-manipulated'">
-                        {{ evt.isActive !== false ? 'Aktif' : 'Nonaktif' }}
-                      </span>
                       <span class="badge badge-brand">{{ evt.totalCertificates || 0 }} Sertifikat Terbit</span>
+                      <span v-if="evt.templateImagePath" class="badge badge-valid">Template PNG Terunggah</span>
+                      <span v-else class="badge badge-manipulated">Tanpa Template</span>
                     </div>
                     <h4 class="e-name">{{ evt.eventName }}</h4>
                     <p class="e-sub">{{ evt.eventDate }} &bull; {{ evt.organizer }}</p>
@@ -948,16 +993,16 @@ onMounted(() => {
                   <div class="e-actions">
                     <button
                       class="btn btn-secondary btn-sm"
-                      @click="handleToggleEventActive(evt)"
-                      :title="evt.isActive !== false ? 'Nonaktifkan Event' : 'Aktifkan Event'"
+                      @click="openEditEventModal(evt)"
+                      title="Edit Agenda Kegiatan"
                     >
-                      <Power :size="14" />
-                      <span>{{ evt.isActive !== false ? 'Nonaktifkan' : 'Aktifkan' }}</span>
+                      <Pencil :size="14" />
+                      <span>Edit</span>
                     </button>
                     <button
                       class="btn btn-danger-sm"
                       @click="handleDeleteEvent(evt)"
-                      title="Hapus Event"
+                      title="Hapus Agenda Kegiatan"
                     >
                       <Trash2 :size="14" />
                     </button>
@@ -1174,6 +1219,76 @@ onMounted(() => {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal: Edit Agenda Kegiatan (CRUD Event: Update) -->
+    <div v-if="showEditEventModal" class="modal-backdrop" @click="showEditEventModal = false">
+      <div class="modal-dialog glass-card" @click.stop style="max-width: 550px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Edit Agenda Kegiatan</h3>
+          <button class="close-btn" @click="showEditEventModal = false">&times;</button>
+        </div>
+        <form @submit.prevent="handleUpdateEvent" class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Nama Kegiatan</label>
+            <input
+              type="text"
+              v-model="editingEventForm.eventName"
+              class="form-input"
+              placeholder="Contoh: Seminar Nasional AI & Keamanan Digital 2026"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Tanggal Pelaksanaan</label>
+            <VueDatePicker
+              v-model="editingEventForm.eventDate"
+              model-type="yyyy-MM-dd"
+              format="yyyy-MM-dd"
+              :enable-time-picker="false"
+              auto-apply
+              dark
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Instansi Penyelenggara</label>
+            <input
+              type="text"
+              v-model="editingEventForm.organizer"
+              class="form-input"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Ganti Citra Template Sertifikat (Opsional, PNG Maks 10 MB)</label>
+            <input
+              type="file"
+              accept=".png,image/png"
+              @change="(e) => (editEventTemplate = e.target.files[0])"
+              class="form-input"
+            />
+            <small class="form-hint">Biarkan kosong jika tidak ingin mengubah template yang sudah ada.</small>
+          </div>
+
+          <div v-if="editEventError" class="login-error-alert">
+            <AlertTriangle :size="15" />
+            <span>{{ editEventError }}</span>
+          </div>
+
+          <div class="modal-footer" style="padding-top: 15px;">
+            <button type="button" class="btn btn-secondary" @click="showEditEventModal = false">Batal</button>
+            <button type="submit" class="btn btn-primary" :disabled="isUpdatingEvent">
+              <RefreshCw v-if="isUpdatingEvent" :size="16" class="spin-icon" />
+              <CheckCircle2 v-else :size="16" />
+              <span>{{ isUpdatingEvent ? 'Menyimpan...' : 'Simpan Perubahan' }}</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 

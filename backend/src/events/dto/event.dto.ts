@@ -3,7 +3,6 @@ import {
   IsString,
   MaxLength,
   IsOptional,
-  IsBoolean,
 } from 'class-validator';
 
 export class CreateEventDto {
@@ -38,10 +37,6 @@ export class UpdateEventDto {
   @IsString({ message: 'Penyelenggara event harus berupa teks' })
   @MaxLength(150, { message: 'Penyelenggara event maksimal 150 karakter' })
   organizer?: string;
-
-  @IsOptional()
-  @IsBoolean({ message: 'Status aktif harus bernilai boolean' })
-  isActive?: boolean;
 }
 
 export class CreateRecipientDto {
