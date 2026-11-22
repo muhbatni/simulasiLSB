@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { useDialogStore } from '../stores/dialog'
 import {
   Lock,
   User,
@@ -21,6 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'login-success'])
 
 const authStore = useAuthStore()
+const dialogStore = useDialogStore()
 const username = ref('admin')
 const password = ref('123')
 const isLoading = ref(false)
@@ -41,8 +43,12 @@ onUnmounted(() => {
 })
 
 const handleLogin = async () => {
-  if (!username.value.trim()) {
-    errorMessage.value = 'Silakan masukkan Username atau NIM Anda.'
+  if (!username.value || !username.value.trim()) {
+    dialogStore.warning('Silakan masukkan Username atau NIM Anda.', 'Kolom Wajib Diisi')
+    return
+  }
+  if (!password.value || !password.value.trim()) {
+    dialogStore.warning('Silakan masukkan kata sandi akun Anda.', 'Kolom Wajib Diisi')
     return
   }
 
@@ -51,10 +57,13 @@ const handleLogin = async () => {
 
   try {
     const user = await authStore.login(username.value.trim(), password.value.trim())
+    dialogStore.success(`Selamat datang kembali, ${user.name}!`, 'Login Berhasil')
     emit('login-success', user)
     emit('close')
   } catch (err) {
-    errorMessage.value = authStore.error || 'Login gagal. Periksa kredensial akun Anda.'
+    const msg = authStore.error || 'Login gagal. Periksa kredensial akun Anda.'
+    errorMessage.value = msg
+    dialogStore.error(msg, 'Autentikasi Gagal')
   } finally {
     isLoading.value = false
   }
@@ -86,7 +95,7 @@ const quickSelectUser = (u) => {
       </div>
 
       <!-- Single Unified Form -->
-      <form @submit.prevent="handleLogin" class="unified-login-form">
+      <form novalidate @submit.prevent="handleLogin" class="unified-login-form">
         <div class="form-group">
           <label class="form-label">Username atau NIM Mahasiswa</label>
           <div class="input-icon-wrap">
@@ -96,7 +105,6 @@ const quickSelectUser = (u) => {
               v-model="username"
               class="form-input with-icon"
               placeholder="Contoh: admin atau 09020623041"
-              required
             />
           </div>
         </div>
@@ -113,7 +121,6 @@ const quickSelectUser = (u) => {
               v-model="password"
               class="form-input with-icon"
               placeholder="123"
-              required
             />
           </div>
         </div>
@@ -128,7 +135,7 @@ const quickSelectUser = (u) => {
             @click="quickSelectUser('admin')"
           >
             <ShieldCheck :size="12" />
-            <span>Admin Fakultas (`admin`)</span>
+            <span>Admin Prodi (`admin`)</span>
           </button>
           <button
             type="button"

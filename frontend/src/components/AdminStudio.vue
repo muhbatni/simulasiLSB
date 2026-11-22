@@ -116,7 +116,7 @@ const newEventForm = ref({
   eventDate: new Date().toISOString().split('T')[0],
   startTime: '08:00',
   endTime: '12:00',
-  organizer: 'Fakultas Sains dan Teknologi UIN Sunan Ampel Surabaya',
+  organizer: 'Program Studi Sistem Informasi UIN Sunan Ampel Surabaya',
   certificatePrefix: '041/HIMAPROSIF/XI/2026/',
 })
 const newEventTemplate = ref(null)
@@ -173,14 +173,26 @@ const logSearchQuery = ref('')
 const isLoadingLogs = ref(false)
 
 const handleLogin = async () => {
+  if (!loginUsername.value || !loginUsername.value.trim()) {
+    dialog.warning('Silakan masukkan Username admin.', 'Kolom Wajib Diisi')
+    return
+  }
+  if (!loginPassword.value || !loginPassword.value.trim()) {
+    dialog.warning('Silakan masukkan kata sandi admin.', 'Kolom Wajib Diisi')
+    return
+  }
+
   loginError.value = ''
   isLoggingIn.value = true
   try {
-    const user = await authStore.login(loginUsername.value, loginPassword.value)
+    const user = await authStore.login(loginUsername.value.trim(), loginPassword.value.trim())
+    dialog.success(`Selamat datang kembali, ${user.name}!`, 'Login Berhasil')
     emit('login-success', user)
     await loadDashboardData()
   } catch (err) {
-    loginError.value = authStore.error || 'Username atau password salah'
+    const msg = authStore.error || 'Username atau password tidak sesuai'
+    loginError.value = msg
+    dialog.error(msg, 'Autentikasi Gagal')
   } finally {
     isLoggingIn.value = false
   }
@@ -308,6 +320,20 @@ const handleEventChange = async () => {
 // F-04: Tambah Calon Penerima Individual
 const handleAddRecipient = async () => {
   if (!selectedEventId.value) return
+
+  if (!newRecipientForm.value.recipientName || !newRecipientForm.value.recipientName.trim()) {
+    dialog.warning('Nama lengkap penerima sertifikat wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+  if (!newRecipientForm.value.recipientIdentifier || !newRecipientForm.value.recipientIdentifier.trim()) {
+    dialog.warning('NIM atau nomor identifikasi penerima wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+  if (!currentEventHasPrefix.value && (!newRecipientForm.value.certificateNumber || !newRecipientForm.value.certificateNumber.trim())) {
+    dialog.warning('Nomor sertifikat wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
   isAddingRecipient.value = true
   addRecipientError.value = ''
 
@@ -332,8 +358,11 @@ const handleAddRecipient = async () => {
     }
     await loadRecipients(selectedEventId.value)
     await loadDashboardData()
+    dialog.success('Calon penerima sertifikat berhasil ditambahkan!')
   } catch (err) {
-    addRecipientError.value = err.response?.data?.message || 'Gagal menambahkan penerima'
+    const msg = err.response?.data?.message || 'Gagal menambahkan penerima'
+    addRecipientError.value = msg
+    dialog.error(msg, 'Gagal Tambah Penerima')
   } finally {
     isAddingRecipient.value = false
   }
@@ -358,6 +387,11 @@ const handleCsvFileChange = (e) => {
 
 const handlePreviewCsv = async () => {
   if (!selectedEventId.value) return
+  if (!csvFile.value && (!csvTextInput.value || !csvTextInput.value.trim())) {
+    dialog.warning('Silakan pilih berkas CSV atau tempel teks data penerima terlebih dahulu.', 'Data Kosong')
+    return
+  }
+
   isPreviewingCsv.value = true
   csvImportError.value = ''
   csvPreviewData.value = null
@@ -382,7 +416,9 @@ const handlePreviewCsv = async () => {
     )
     csvPreviewData.value = res.data
   } catch (err) {
-    csvImportError.value = err.response?.data?.message || 'Gagal membaca berkas CSV'
+    const msg = err.response?.data?.message || 'Gagal membaca berkas CSV'
+    csvImportError.value = msg
+    dialog.error(msg, 'Gagal Pratinjau CSV')
   } finally {
     isPreviewingCsv.value = false
   }
@@ -390,6 +426,11 @@ const handlePreviewCsv = async () => {
 
 const handleExecuteCsvImport = async () => {
   if (!selectedEventId.value) return
+  if (!csvFile.value && (!csvTextInput.value || !csvTextInput.value.trim())) {
+    dialog.warning('Silakan pilih berkas CSV atau tempel teks data penerima terlebih dahulu.', 'Data Kosong')
+    return
+  }
+
   isImportingCsv.value = true
   csvImportError.value = ''
 
@@ -417,7 +458,9 @@ const handleExecuteCsvImport = async () => {
     await loadRecipients(selectedEventId.value)
     dialog.success('Impor massal penerima berhasil disimpan dengan status Belum Terbit!')
   } catch (err) {
-    csvImportError.value = err.response?.data?.message || 'Gagal mengimpor data CSV'
+    const msg = err.response?.data?.message || 'Gagal mengimpor data CSV'
+    csvImportError.value = msg
+    dialog.error(msg, 'Gagal Impor CSV')
   } finally {
     isImportingCsv.value = false
   }
@@ -435,6 +478,12 @@ const toggleSelectAllRecipients = () => {
 
 const handleIssueSelected = async () => {
   if (!selectedEventId.value) return
+  const unpublished = selectedEventRecipients.value.filter((r) => r.status === 'BELUM_TERBIT')
+  if (unpublished.length === 0) {
+    dialog.warning('Tidak ada calon penerima dengan status Belum Terbit pada agenda ini.', 'Pemberitahuan')
+    return
+  }
+
   isIssuing.value = true
   issueResult.value = null
 
@@ -496,11 +545,29 @@ const handleDownloadZip = async () => {
 
 // F-03: Event Management (Create, Toggle Active, Delete)
 const handleCreateEvent = async () => {
-  if (!newEventForm.value.eventName) return
+  if (!newEventForm.value.eventName || !newEventForm.value.eventName.trim()) {
+    dialog.warning('Nama agenda kegiatan wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
+  if (!newEventForm.value.eventDate) {
+    dialog.warning('Tanggal pelaksanaan agenda kegiatan wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
+  if (!newEventForm.value.organizer || !newEventForm.value.organizer.trim()) {
+    dialog.warning('Instansi / Penyelenggara kegiatan wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
 
   const prefix = (newEventForm.value.certificatePrefix || '').trim()
+  if (!prefix) {
+    dialog.warning('Format / pola nomor sertifikat wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
   if (!prefix.endsWith('/')) {
-    dialog.warning("Format nomor sertifikat ditolak! Harus diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)")
+    dialog.warning("Format nomor sertifikat wajib diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)", 'Format Tidak Sesuai')
     return
   }
 
@@ -938,18 +1005,38 @@ const handleSaveAutocratPositions = async () => {
     dialog.success('Konfigurasi posisi teks template sertifikat berhasil disimpan!')
     await loadDashboardData()
   } catch (err) {
-    autocratError.value = err.response?.data?.message || 'Gagal menyimpan posisi template'
+    const msg = err.response?.data?.message || 'Gagal menyimpan posisi template'
+    autocratError.value = msg
+    dialog.error(msg, 'Gagal Menyimpan Posisi')
   } finally {
     isSavingAutocrat.value = false
   }
 }
 
 const handleUpdateEvent = async () => {
-  if (!editingEventForm.value.eventName) return
+  if (!editingEventForm.value.eventName || !editingEventForm.value.eventName.trim()) {
+    dialog.warning('Nama kegiatan wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
+  if (!editingEventForm.value.eventDate) {
+    dialog.warning('Tanggal pelaksanaan kegiatan wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
+  if (!editingEventForm.value.organizer || !editingEventForm.value.organizer.trim()) {
+    dialog.warning('Instansi penyelenggara kegiatan wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
 
   const prefix = (editingEventForm.value.certificatePrefix || '').trim()
-  if (prefix && !prefix.endsWith('/')) {
-    editEventError.value = "Format nomor sertifikat ditolak! Harus diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)"
+  if (!prefix) {
+    dialog.warning('Format / pola nomor sertifikat wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
+  if (!prefix.endsWith('/')) {
+    dialog.warning("Format nomor sertifikat wajib diakhiri tanda garis miring '/' (contoh: 041/HIMAPROSIF/XI/2026/)", 'Format Tidak Sesuai')
     return
   }
 
@@ -981,7 +1068,9 @@ const handleUpdateEvent = async () => {
     await loadDashboardData()
     dialog.success('Agenda kegiatan berhasil diperbarui!')
   } catch (err) {
-    editEventError.value = err.response?.data?.message || 'Gagal memperbarui agenda kegiatan'
+    const msg = err.response?.data?.message || 'Gagal memperbarui agenda kegiatan'
+    editEventError.value = msg
+    dialog.error(msg, 'Gagal Memperbarui Agenda')
   } finally {
     isUpdatingEvent.value = false
   }
@@ -1099,6 +1188,23 @@ const handleCoverFileChange = (e) => {
 }
 
 const handleSingleGenerate = async () => {
+  if (!genForm.value.eventId) {
+    dialog.warning('Silakan pilih agenda kegiatan terlebih dahulu.', 'Pilih Kegiatan')
+    return
+  }
+  if (!genForm.value.recipientName || !genForm.value.recipientName.trim()) {
+    dialog.warning('Nama lengkap penerima sertifikat wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+  if (!genForm.value.recipientIdentifier || !genForm.value.recipientIdentifier.trim()) {
+    dialog.warning('NIM atau nomor identifikasi penerima wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+  if (!hasEventPrefix.value && (!genForm.value.certificateNumber || !genForm.value.certificateNumber.trim())) {
+    dialog.warning('Nomor sertifikat wajib diisi.', 'Kolom Wajib Diisi')
+    return
+  }
+
   isGenerating.value = true
   genError.value = ''
   genResult.value = null
@@ -1128,8 +1234,11 @@ const handleSingleGenerate = async () => {
     })
     genResult.value = res.data
     await loadDashboardData()
+    dialog.success('E-Sertifikat berhasil diterbitkan!')
   } catch (err) {
-    genError.value = err.response?.data?.message || 'Gagal menerbitkan e-sertifikat'
+    const msg = err.response?.data?.message || 'Gagal menerbitkan e-sertifikat'
+    genError.value = msg
+    dialog.error(msg, 'Gagal Terbitkan Sertifikat')
   } finally {
     isGenerating.value = false
   }
@@ -1175,7 +1284,7 @@ onUnmounted(() => {
             <p class="login-sub">Masuk untuk mengelola event &amp; menerbitkan e-sertifikat berkeamanan LSB</p>
           </div>
 
-          <form @submit.prevent="handleLogin" class="login-form">
+          <form novalidate @submit.prevent="handleLogin" class="login-form">
             <div class="form-group">
               <label class="form-label">Username</label>
               <input
@@ -1183,7 +1292,6 @@ onUnmounted(() => {
                 v-model="loginUsername"
                 class="form-input"
                 placeholder="Username admin"
-                required
               />
             </div>
 
@@ -1194,7 +1302,6 @@ onUnmounted(() => {
                 v-model="loginPassword"
                 class="form-input"
                 placeholder="Kata sandi"
-                required
               />
             </div>
 
@@ -1211,7 +1318,7 @@ onUnmounted(() => {
           </form>
 
           <div class="demo-creds-hint">
-            <span>Login Admin: <strong>admin</strong> (Fakultas) &bull; Password: <strong>123</strong></span>
+            <span>Login Admin: <strong>admin</strong> (Prodi) &bull; Password: <strong>123</strong></span>
           </div>
         </div>
       </div>
@@ -1223,7 +1330,7 @@ onUnmounted(() => {
           <div>
             <div class="badge badge-brand">
               <ShieldCheck :size="14" />
-              <span>ADMINISTRASI RESMI FAKULTAS</span>
+              <span>ADMINISTRASI RESMI PRODI</span>
             </div>
             <h2 class="dash-title">Admin Studio E-Sertifikat</h2>
             <p class="dash-sub">Kelola calon penerima, impor massal CSV, steganografi LSB, serta audit log verifikasi.</p>
@@ -1254,7 +1361,7 @@ onUnmounted(() => {
               <Calendar :size="20" class="stat-icon text-coral" />
             </div>
             <div class="stat-number">{{ events.length }}</div>
-            <div class="stat-foot">Fakultas &amp; HIMA UINSA</div>
+            <div class="stat-foot">Program Studi &amp; HIMA UINSA</div>
           </div>
 
           <div class="stat-box glass-card">
@@ -1603,7 +1710,7 @@ onUnmounted(() => {
               <h3 class="pane-title">Tambah Agenda Kegiatan Baru</h3>
               <p class="pane-sub">Unggah template sertifikat PNG (maks 10 MB) dengan magic bytes tervalidasi.</p>
 
-              <form @submit.prevent="handleCreateEvent" class="studio-form">
+              <form novalidate @submit.prevent="handleCreateEvent" class="studio-form">
                 <div class="form-group">
                   <label class="form-label">Nama Kegiatan</label>
                   <input
@@ -1611,7 +1718,6 @@ onUnmounted(() => {
                     v-model="newEventForm.eventName"
                     class="form-input"
                     placeholder="Contoh: Seminar Nasional AI & Keamanan Digital 2026"
-                    required
                   />
                 </div>
 
@@ -1628,7 +1734,6 @@ onUnmounted(() => {
                     auto-apply
                     placeholder="Pilih Tanggal Pelaksanaan"
                     dark
-                    required
                   />
                 </div>
 
@@ -1667,7 +1772,7 @@ onUnmounted(() => {
 
                 <div class="form-group">
                   <label class="form-label">Instansi Penyelenggara</label>
-                  <input type="text" v-model="newEventForm.organizer" class="form-input" required />
+                  <input type="text" v-model="newEventForm.organizer" class="form-input" />
                 </div>
 
                 <div class="form-group">
@@ -1677,7 +1782,6 @@ onUnmounted(() => {
                     v-model="newEventForm.certificatePrefix"
                     class="form-input font-mono"
                     placeholder="Contoh: 041/HIMAPROSIF/XI/2026/"
-                    required
                   />
                   <small class="form-hint">Format wajib diakhiri tanda garis miring '<code>/</code>' (contoh: <code>041/HIMAPROSIF/XI/2026/</code>). Nomor urut sertifikat (001, 002, dst.) otomatis ditambahkan setelah tanda garis miring.</small>
                 </div>
@@ -1770,10 +1874,10 @@ onUnmounted(() => {
               <h3 class="pane-title">Penerbitan E-Sertifikat Cepat (Tunggal)</h3>
               <p class="pane-sub">Secara instan menyisipkan segel integritas SHA-256 dan bit LSB pada citra PNG.</p>
 
-              <form @submit.prevent="handleSingleGenerate" class="studio-form">
+              <form novalidate @submit.prevent="handleSingleGenerate" class="studio-form">
                 <div class="form-group">
                   <label class="form-label">Pilih Agenda Kegiatan</label>
-                  <select v-model="genForm.eventId" class="form-select" required>
+                  <select v-model="genForm.eventId" class="form-select">
                     <option v-for="e in events" :key="e.id" :value="e.id">
                       {{ e.eventName }} ({{ formatDateOnly(e.eventDate) }}{{ e.startTime ? ' ' + e.startTime : '' }})
                     </option>
@@ -1783,11 +1887,11 @@ onUnmounted(() => {
                 <div class="grid-2-col-sm">
                   <div class="form-group">
                     <label class="form-label">Nama Lengkap Penerima</label>
-                    <input type="text" v-model="genForm.recipientName" class="form-input" required />
+                    <input type="text" v-model="genForm.recipientName" class="form-input" />
                   </div>
                   <div class="form-group">
                     <label class="form-label">NIM / Identifikasi</label>
-                    <input type="text" v-model="genForm.recipientIdentifier" class="form-input" required />
+                    <input type="text" v-model="genForm.recipientIdentifier" class="form-input" />
                   </div>
                 </div>
 
@@ -2011,7 +2115,7 @@ onUnmounted(() => {
             <h3 class="modal-title">Edit Agenda Kegiatan</h3>
             <button type="button" class="close-btn" @click="showEditEventModal = false" title="Tutup Modal (Esc)">&times;</button>
           </div>
-          <form @submit.prevent="handleUpdateEvent" class="modal-body">
+          <form novalidate @submit.prevent="handleUpdateEvent" class="modal-body">
           <div class="form-group">
             <label class="form-label">Nama Kegiatan</label>
             <input
@@ -2019,7 +2123,6 @@ onUnmounted(() => {
               v-model="editingEventForm.eventName"
               class="form-input"
               placeholder="Contoh: Seminar Nasional AI & Keamanan Digital 2026"
-              required
             />
           </div>
 
@@ -2036,7 +2139,6 @@ onUnmounted(() => {
               auto-apply
               placeholder="Pilih Tanggal Pelaksanaan"
               dark
-              required
             />
           </div>
 
@@ -2079,7 +2181,6 @@ onUnmounted(() => {
               type="text"
               v-model="editingEventForm.organizer"
               class="form-input"
-              required
             />
           </div>
 
@@ -2090,7 +2191,6 @@ onUnmounted(() => {
               v-model="editingEventForm.certificatePrefix"
               class="form-input font-mono"
               placeholder="Contoh: 041/HIMAPROSIF/XI/2026/"
-              required
             />
             <small class="form-hint">Format harus diakhiri tanda garis miring '<code>/</code>' (contoh: <code>041/HIMAPROSIF/XI/2026/</code>). Nomor urutan peserta (001, 002, dst.) diteruskan otomatis.</small>
           </div>
@@ -2561,14 +2661,14 @@ onUnmounted(() => {
           <h3 class="modal-title">Tambah Calon Penerima</h3>
           <button type="button" class="close-btn" @click="showAddRecipientModal = false" title="Tutup Modal (Esc)">&times;</button>
         </div>
-        <form @submit.prevent="handleAddRecipient" class="modal-body">
+        <form novalidate @submit.prevent="handleAddRecipient" class="modal-body">
           <div class="form-group">
             <label class="form-label">Nama Lengkap Penerima</label>
-            <input type="text" v-model="newRecipientForm.recipientName" class="form-input" required />
+            <input type="text" v-model="newRecipientForm.recipientName" class="form-input" />
           </div>
           <div class="form-group">
             <label class="form-label">NIM / Identifikasi Mahasiswa</label>
-            <input type="text" v-model="newRecipientForm.recipientIdentifier" class="form-input" required />
+            <input type="text" v-model="newRecipientForm.recipientIdentifier" class="form-input" />
           </div>
           <div class="form-group">
             <label class="form-label">Peran Partisipasi</label>

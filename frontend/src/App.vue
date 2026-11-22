@@ -52,6 +52,18 @@ onMounted(async () => {
     dialogStore.alert(String(msg || ''))
   }
 
+  // Mencegah semua tooltip/bubble validasi bawaan browser (seperti "Please fill out this field")
+  window.addEventListener(
+    'invalid',
+    (e) => {
+      e.preventDefault()
+      const el = e.target
+      const msg = el?.validationMessage || 'Silakan lengkapi bidang ini.'
+      dialogStore.warning(msg, 'Kolom Wajib Diisi')
+    },
+    true
+  )
+
   await authStore.fetchProfile()
   window.addEventListener('auth:expired', () => {
     authStore.logout()

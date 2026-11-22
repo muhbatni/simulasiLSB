@@ -13,12 +13,14 @@ async function main() {
   // 1. Seed Users
   const admin = await prisma.user.upsert({
     where: { username: 'admin' },
-    update: {},
+    update: {
+      name: 'Administrator Prodi Sistem Informasi',
+    },
     create: {
       id: 'usr-admin-1',
       username: 'admin',
       passwordHash,
-      name: 'Administrator Fakultas (FST UINSA)',
+      name: 'Administrator Prodi Sistem Informasi',
       role: Role.admin,
     },
   });

@@ -61,62 +61,64 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <Transition name="dialog-fade">
-    <div v-if="dialog.isOpen" class="custom-dialog-backdrop" @click="dialog.handleCancel">
-      <div class="custom-dialog-box glass-card" @click.stop>
-        <!-- Close Button (X) -->
-        <button class="dialog-close-btn" @click="dialog.handleCancel" title="Tutup">
-          <X :size="18" />
-        </button>
-
-        <!-- Icon Orb -->
-        <div class="dialog-orb" :class="orbClass">
-          <CheckCircle2 v-if="dialog.type === 'success'" :size="30" class="text-white" />
-          <XCircle v-else-if="dialog.type === 'error'" :size="30" class="text-white" />
-          <AlertTriangle v-else-if="dialog.type === 'warning'" :size="30" class="text-white" />
-          <HelpCircle v-else-if="dialog.type === 'confirm'" :size="30" class="text-white" />
-          <Info v-else :size="30" class="text-white" />
-        </div>
-
-        <!-- Title & Message -->
-        <div class="dialog-content">
-          <h3 class="dialog-title">{{ dialog.title }}</h3>
-          <p class="dialog-message">{{ dialog.message }}</p>
-        </div>
-
-        <!-- Actions -->
-        <div class="dialog-actions" :class="{ 'actions-split': isConfirm }">
-          <button
-            v-if="isConfirm"
-            type="button"
-            class="btn btn-secondary dialog-btn"
-            @click="dialog.handleCancel"
-          >
-            {{ dialog.cancelText || 'Batal' }}
+  <Teleport to="body">
+    <Transition name="dialog-fade">
+      <div v-if="dialog.isOpen" class="custom-dialog-backdrop" @click="dialog.handleCancel">
+        <div class="custom-dialog-box glass-card" @click.stop>
+          <!-- Close Button (X) -->
+          <button class="dialog-close-btn" @click="dialog.handleCancel" title="Tutup">
+            <X :size="18" />
           </button>
-          <button
-            ref="confirmBtnRef"
-            type="button"
-            class="btn dialog-btn"
-            :class="dialog.isDanger && isConfirm ? 'btn-danger' : 'btn-primary'"
-            @click="dialog.handleConfirm"
-          >
-            {{ dialog.confirmText || (isConfirm ? 'Ya, Lanjutkan' : 'Mengerti') }}
-          </button>
+
+          <!-- Icon Orb -->
+          <div class="dialog-orb" :class="orbClass">
+            <CheckCircle2 v-if="dialog.type === 'success'" :size="30" class="text-white" />
+            <XCircle v-else-if="dialog.type === 'error'" :size="30" class="text-white" />
+            <AlertTriangle v-else-if="dialog.type === 'warning'" :size="30" class="text-white" />
+            <HelpCircle v-else-if="dialog.type === 'confirm'" :size="30" class="text-white" />
+            <Info v-else :size="30" class="text-white" />
+          </div>
+
+          <!-- Title & Message -->
+          <div class="dialog-content">
+            <h3 class="dialog-title">{{ dialog.title }}</h3>
+            <p class="dialog-message">{{ dialog.message }}</p>
+          </div>
+
+          <!-- Actions -->
+          <div class="dialog-actions" :class="{ 'actions-split': isConfirm }">
+            <button
+              v-if="isConfirm"
+              type="button"
+              class="btn btn-secondary dialog-btn"
+              @click="dialog.handleCancel"
+            >
+              {{ dialog.cancelText || 'Batal' }}
+            </button>
+            <button
+              ref="confirmBtnRef"
+              type="button"
+              class="btn dialog-btn"
+              :class="dialog.isDanger && isConfirm ? 'btn-danger' : 'btn-primary'"
+              @click="dialog.handleConfirm"
+            >
+              {{ dialog.confirmText || (isConfirm ? 'Ya, Lanjutkan' : 'Mengerti') }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  </Transition>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
 .custom-dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 6, 8, 0.82);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  z-index: 10000;
+  background: rgba(8, 6, 8, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 999999 !important;
   display: flex;
   align-items: center;
   justify-content: center;
