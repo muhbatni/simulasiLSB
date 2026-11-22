@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Query,
   Body,
@@ -83,6 +84,13 @@ export class CertificatesController {
       throw new ForbiddenException('Akses ditolak: sertifikat bukan milik akun Anda');
     }
     return cert;
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Delete(':id')
+  delete(@Param('id') id: string) {
+    return this.certService.deleteCertificate(id);
   }
 
   // Mengunduh e-sertifikat stego PNG utuh tanpa kompresi visual

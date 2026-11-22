@@ -455,6 +455,54 @@ export class CertificatesService {
     };
   }
 
+  async deleteCertificate(id: string): Promise<boolean> {
+    const cert = await this.prisma.certificate.findUnique({
+      where: { id },
+    });
+    if (!cert) {
+      throw new NotFoundException(`Sertifikat dengan ID ${id} tidak ditemukan`);
+    }
+
+    const stegoDir = path.join(process.cwd(), 'uploads', 'stego');
+    const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+    const certDir = path.join(process.cwd(), 'uploads', 'certificates');
+
+    const removeFileIfExists = (p: string) => {
+      try {
+        if (p && fs.existsSync(p)) fs.unlinkSync(p);
+      } catch (e) {
+        console.warn(`Gagal menghapus file ${p}:`, e);
+      }
+    };
+
+    removeFileIfExists(path.join(stegoDir, `${cert.id}.png`));
+    if (cert.stegoImagePath) {
+      removeFileIfExists(path.join(stegoDir, cert.stegoImagePath));
+      removeFileIfExists(path.join(certDir, cert.stegoImagePath));
+    }
+    removeFileIfExists(path.join(certDir, `${cert.id}.png`));
+
+    removeFileIfExists(path.join(coversDir, `cover-${cert.id}.png`));
+    if (cert.coverImagePath) {
+      removeFileIfExists(path.join(coversDir, cert.coverImagePath));
+    }
+
+    await this.prisma.verificationLog.deleteMany({
+      where: {
+        OR: [
+          { certificateId: cert.id },
+          { certificateNumber: cert.certificateNumber },
+        ],
+      },
+    });
+
+    await this.prisma.certificate.delete({
+      where: { id },
+    });
+
+    return true;
+  }
+
   // Unduh Koleksi Berkas (ZIP Archive) Mode Store Lossless
   async streamZipArchive(certificateIds: string[], res: Response) {
     if (!certificateIds || certificateIds.length === 0) {

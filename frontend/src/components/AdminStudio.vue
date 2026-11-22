@@ -989,10 +989,10 @@ const handleUpdateEvent = async () => {
 
 const handleDeleteEvent = async (event) => {
   const confirmed = await dialog.confirm(
-    `Yakin ingin menghapus agenda '${event.eventName}'? Seluruh data sertifikat dan penerima terkait akan ikut terhapus.`,
+    `Yakin ingin menghapus agenda '${event.eventName}'? Seluruh data penerima dan berkas e-sertifikat terkait akan ikut terhapus permanen dari server.`,
     {
       title: 'Hapus Agenda Kegiatan',
-      confirmText: 'Ya, Hapus',
+      confirmText: 'Ya, Hapus Semua',
       cancelText: 'Batal',
       isDanger: true,
     }
@@ -1003,11 +1003,60 @@ const handleDeleteEvent = async (event) => {
     await api.delete(`/events/${event.id}`)
     if (selectedEventId.value === event.id) {
       selectedEventId.value = ''
+      selectedEventRecipients.value = []
     }
     await loadDashboardData()
-    dialog.success('Agenda berhasil dihapus.')
+    dialog.success('Agenda kegiatan, seluruh penerima, dan berkas berhasil dihapus.')
   } catch (err) {
     dialog.error(err.response?.data?.message || 'Gagal menghapus event.')
+  }
+}
+
+const handleDeleteRecipient = async (recipient) => {
+  if (!selectedEventId.value || !recipient) return
+  const confirmed = await dialog.confirm(
+    `Yakin ingin menghapus penerima '${recipient.recipientName}' (${recipient.certificateNumber})? Berkas sertifikat terkait di server juga akan dihapus.`,
+    {
+      title: 'Hapus Penerima Sertifikat',
+      confirmText: 'Ya, Hapus',
+      cancelText: 'Batal',
+      isDanger: true,
+    }
+  )
+  if (!confirmed) return
+
+  try {
+    await api.delete(`/events/${selectedEventId.value}/recipients/${recipient.id}`)
+    dialog.success('Data penerima dan berkas sertifikat berhasil dihapus.')
+    await loadRecipients(selectedEventId.value)
+    await loadDashboardData()
+  } catch (err) {
+    dialog.error(err.response?.data?.message || 'Gagal menghapus data penerima.')
+  }
+}
+
+const handleDeleteIssuedCertificate = async (cert) => {
+  if (!cert) return
+  const confirmed = await dialog.confirm(
+    `Yakin ingin menghapus sertifikat '${cert.recipientName}' (${cert.certificateNumber})? Berkas PNG stego di server akan ikut terhapus permanen.`,
+    {
+      title: 'Hapus Sertifikat Terbit',
+      confirmText: 'Ya, Hapus',
+      cancelText: 'Batal',
+      isDanger: true,
+    }
+  )
+  if (!confirmed) return
+
+  try {
+    await api.delete(`/certificates/${cert.id}`)
+    dialog.success('Sertifikat dan berkas terkait berhasil dihapus.')
+    await loadDashboardData()
+    if (selectedEventId.value) {
+      await loadRecipients(selectedEventId.value)
+    }
+  } catch (err) {
+    dialog.error(err.response?.data?.message || 'Gagal menghapus sertifikat.')
   }
 }
 
@@ -1406,8 +1455,28 @@ onUnmounted(() => {
                           <Download :size="12" />
                           <span>Unduh</span>
                         </button>
+                        <button
+                          type="button"
+                          class="btn btn-danger-sm"
+                          title="Hapus Penerima & Berkas"
+                          @click="handleDeleteRecipient(r)"
+                          style="padding: 5px 8px; border-radius: 6px;"
+                        >
+                          <Trash2 :size="13" />
+                        </button>
                       </div>
-                      <span v-else class="text-faint text-xs">Menunggu terbit</span>
+                      <div v-else style="display: inline-flex; align-items: center; gap: 6px;">
+                        <span class="text-faint text-xs">Menunggu terbit</span>
+                        <button
+                          type="button"
+                          class="btn btn-danger-sm"
+                          title="Hapus Calon Penerima"
+                          @click="handleDeleteRecipient(r)"
+                          style="padding: 5px 8px; border-radius: 6px;"
+                        >
+                          <Trash2 :size="13" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   <tr v-if="selectedEventRecipients.length === 0">
@@ -1504,6 +1573,15 @@ onUnmounted(() => {
                         >
                           <Download :size="13" />
                           <span>PNG</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-danger-sm"
+                          title="Hapus Sertifikat & Berkas"
+                          @click="handleDeleteIssuedCertificate(c)"
+                          style="padding: 5px 8px; border-radius: 6px;"
+                        >
+                          <Trash2 :size="13" />
                         </button>
                       </div>
                     </td>

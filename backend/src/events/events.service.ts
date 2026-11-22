@@ -175,58 +175,107 @@ export class EventsService {
     });
   }
 
+  private removeFileIfExists(filePath: string) {
+    try {
+      if (filePath && fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (err) {
+      console.warn(`Gagal menghapus berkas ${filePath}:`, err);
+    }
+  }
+
+  private cleanCertificateFiles(cert: { id: string; stegoImagePath?: string | null; coverImagePath?: string | null }) {
+    const stegoDir = path.join(process.cwd(), 'uploads', 'stego');
+    const coversDir = path.join(process.cwd(), 'uploads', 'covers');
+    const certDir = path.join(process.cwd(), 'uploads', 'certificates');
+
+    // Hapus berkas stego PNG (berkas unduhan sertifikat)
+    this.removeFileIfExists(path.join(stegoDir, `${cert.id}.png`));
+    if (cert.stegoImagePath) {
+      this.removeFileIfExists(path.join(stegoDir, cert.stegoImagePath));
+      this.removeFileIfExists(path.join(certDir, cert.stegoImagePath));
+    }
+    this.removeFileIfExists(path.join(certDir, `${cert.id}.png`));
+
+    // Hapus berkas cover PNG
+    this.removeFileIfExists(path.join(coversDir, `cover-${cert.id}.png`));
+    if (cert.coverImagePath) {
+      this.removeFileIfExists(path.join(coversDir, cert.coverImagePath));
+    }
+  }
+
   async deleteEvent(id: string): Promise<boolean> {
     const evt = await this.getEventById(id);
 
     // Hapus file template jika ada
     if (evt.templateImagePath) {
       const coversDir = path.join(process.cwd(), 'uploads', 'covers');
-      const filePath = path.join(coversDir, evt.templateImagePath);
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch (err) {
-          console.warn(`Gagal menghapus file template: ${filePath}`, err);
-        }
-      }
+      this.removeFileIfExists(path.join(coversDir, evt.templateImagePath));
     }
 
-    // Bersihkan file stego dan cover sertifikat jika ada di disk
+    // Ambil seluruh sertifikat dan data penerima terkait event ini
     const certs = await this.prisma.certificate.findMany({
       where: { eventId: id },
-      select: { stegoImagePath: true, coverImagePath: true },
+      select: { id: true, certificateNumber: true, stegoImagePath: true, coverImagePath: true },
     });
 
-    const certDir = path.join(process.cwd(), 'uploads', 'certificates');
-    const coversDir = path.join(process.cwd(), 'uploads', 'covers');
-
+    // Bersihkan seluruh berkas stego (berkas unduhan) dan cover sertifikat dari disk
     for (const cert of certs) {
-      if (cert.stegoImagePath) {
-        const p = path.join(certDir, cert.stegoImagePath);
-        if (fs.existsSync(p)) {
-          try {
-            fs.unlinkSync(p);
-          } catch {}
-        }
-      }
-      if (cert.coverImagePath) {
-        const p = path.join(coversDir, cert.coverImagePath);
-        if (fs.existsSync(p)) {
-          try {
-            fs.unlinkSync(p);
-          } catch {}
-        }
-      }
+      this.cleanCertificateFiles(cert);
     }
 
-    // Hapus seluruh sertifikat terkait event
+    // Bersihkan seluruh log verifikasi terkait sertifikat-sertifikat ini
+    const certIds = certs.map((c) => c.id);
+    const certNumbers = certs.map((c) => c.certificateNumber).filter(Boolean);
+    if (certIds.length > 0 || certNumbers.length > 0) {
+      await this.prisma.verificationLog.deleteMany({
+        where: {
+          OR: [
+            { certificateId: { in: certIds } },
+            { certificateNumber: { in: certNumbers } },
+          ],
+        },
+      });
+    }
+
+    // Hapus seluruh sertifikat/penerima terkait event dari basis data
     await this.prisma.certificate.deleteMany({
       where: { eventId: id },
     });
 
-    // Hapus event
+    // Hapus record event dari basis data
     await this.prisma.event.delete({
       where: { id },
+    });
+
+    return true;
+  }
+
+  async deleteRecipient(eventId: string, recipientId: string): Promise<boolean> {
+    const cert = await this.prisma.certificate.findFirst({
+      where: { id: recipientId, eventId },
+    });
+    if (!cert) {
+      throw new NotFoundException('Data penerima sertifikat tidak ditemukan');
+    }
+
+    // Bersihkan berkas stego dan cover di disk
+    this.cleanCertificateFiles(cert);
+
+    // Hapus log verifikasi terkait
+    await this.prisma.verificationLog.deleteMany({
+      where: {
+        OR: [
+          { certificateId: cert.id },
+          { certificateNumber: cert.certificateNumber },
+        ],
+      },
+    });
+
+    // Hapus data sertifikat penerima dari basis data
+    await this.prisma.certificate.delete({
+      where: { id: cert.id },
     });
 
     return true;

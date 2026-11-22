@@ -227,6 +227,16 @@ export class EventsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
+  @Delete(':id/recipients/:recipientId')
+  deleteRecipient(
+    @Param('id') eventId: string,
+    @Param('recipientId') recipientId: string,
+  ) {
+    return this.eventsService.deleteRecipient(eventId, recipientId);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Get(':id/recipients')
   getRecipients(@Param('id') id: string) {
     return this.eventsService.getEventRecipients(id);
